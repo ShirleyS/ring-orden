@@ -13,12 +13,15 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
     "test": "node --experimental-strip-types --test packages/*/tests/*.test.ts apps/api/tests/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:netlify": "vite build --config vite.netlify.config.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
     "@elevenlabs/client": "1.32.0",
     "@hookform/resolvers": "^5.7.1",
+    "@netlify/database": "2.0.1",
+    "@netlify/functions": "6.0.3",
     "@shadcn/react": "^0.3.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
@@ -45,6 +48,7 @@
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.37.1",
     "@cloudflare/workers-types": "4.20260515.1",
+    "@electric-sql/pglite": "0.3.16",
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",

@@ -136,6 +136,10 @@ The dashboard uses eight-second polling rather than claiming an active Supabase 
 
 See [the demo guide](demo/DEMO.md) and [open-source boundaries](docs/OPEN_SOURCE.md).
 
+## Netlify deployment
+
+See [Netlify deployment](docs/NETLIFY.md) for the dedicated build, verified private-project identity and managed Postgres setup. The original Sites build remains supported.
+
 ## License and publication
 
 Authored code uses the [MIT license](LICENSE). Vendored templates and dependencies retain their own licenses. A hosting source push may be private; the MIT license alone does not change repository visibility or publish an npm package. Public release requires a verified repository URL and reviewed source excluding credentials, runtime state and private merchant data.

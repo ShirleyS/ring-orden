@@ -24,7 +24,11 @@ export function repositoryFor(env: RuntimeEnv): Repository {
 export function storageStatus(env: RuntimeEnv) {
   return {
     provider:
-      env.SUPABASE_URL && env.SUPABASE_SERVER_SECRET ? "supabase" : "d1",
+      env.SUPABASE_URL && env.SUPABASE_SERVER_SECRET
+        ? "supabase"
+        : env.NETLIFY_DATABASE === "true"
+          ? "netlify-postgres"
+          : "d1",
     status: "connected",
     scoped: true,
   };

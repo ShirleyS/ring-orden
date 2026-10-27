@@ -45,3 +45,7 @@ yarn-error.log*
 .DS_Store
 
 !.env.example
+
+# Netlify generated artifacts and local deployment identity
+/.netlify/
+/dist-netlify/
