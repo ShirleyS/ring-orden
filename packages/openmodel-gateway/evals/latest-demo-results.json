@@ -1,0 +1,48 @@
+{
+  "generated_at": "2026-10-27T23:03:45.906Z",
+  "engine": "Deterministic demo parser only — NOT a live-model benchmark",
+  "language_cases": {
+    "total": 105,
+    "passed": 105,
+    "schema_valid": 105,
+    "failures": []
+  },
+  "memory_comparison": {
+    "total": 5,
+    "baseline_correct": 0,
+    "memory_correct": 5,
+    "regression_cases": 4,
+    "memory_induced_regressions": 0,
+    "results": [
+      {
+        "text": "un late de abena",
+        "baseline_correct": false,
+        "memory_correct": true
+      },
+      {
+        "text": "dame un late con abena",
+        "baseline_correct": false,
+        "memory_correct": true
+      },
+      {
+        "text": "otro latte de abena",
+        "baseline_correct": false,
+        "memory_correct": true
+      },
+      {
+        "text": "two lattes abena",
+        "baseline_correct": false,
+        "memory_correct": true
+      },
+      {
+        "text": "me regalas dos lattes con abena",
+        "baseline_correct": false,
+        "memory_correct": true
+      }
+    ]
+  },
+  "live_model_benchmark": {
+    "status": "Not run. Provide real server-side credentials and call runCompatibilityTest(adapter).",
+    "results": null
+  }
+}

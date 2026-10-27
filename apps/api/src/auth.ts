@@ -1,0 +1,248 @@
+export interface RuntimeEnv {
+  DB?: D1Database;
+  MOJOAUTH_JWKS_URL?: string;
+  MOJOAUTH_ISSUER?: string;
+  MOJOAUTH_AUDIENCE?: string;
+  SESSION_SECRET?: string;
+  DEMO_MODE?: string;
+  TRUST_SITES_HEADERS?: string;
+  DEEPSEEK_API_KEY?: string;
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_WEBHOOK_SECRET?: string;
+  TWILIO_ACCOUNT_SID?: string;
+  TWILIO_AUTH_TOKEN?: string;
+  TWILIO_WHATSAPP_FROM?: string;
+  TWILIO_WHATSAPP_TEMPLATE_SID?: string;
+  ELEVENLABS_API_KEY?: string;
+  ELEVENLABS_AGENT_ID?: string;
+  AGENT_TOOL_SECRET?: string;
+  AGENT_MERCHANT_ID?: string;
+  SQUARE_ACCESS_TOKEN?: string;
+  SQUARE_LOCATION_ID?: string;
+  SQUARE_ENVIRONMENT?: string;
+  N8N_WEBHOOK_URL?: string;
+  N8N_WEBHOOK_SECRET?: string;
+  APP_ORIGIN?: string;
+  SUPABASE_URL?: string;
+  SUPABASE_SERVER_SECRET?: string;
+  [key: string]: unknown;
+}
+export interface Identity {
+  id: string;
+  email: string;
+  name: string;
+  provider: "sites" | "mojoauth" | "local-demo";
+  email_verified?: boolean;
+}
+export class HttpError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+const encoder = new TextEncoder();
+const bytes = (value: string) =>
+  Uint8Array.from(atob(value.replace(/-/g, "+").replace(/_/g, "/")), (c) =>
+    c.charCodeAt(0),
+  );
+const b64 = (data: Uint8Array) =>
+  btoa(String.fromCharCode(...data))
+    .replace(/=/g, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
+export async function tenantIdFor(ownerId: string): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-256", encoder.encode(ownerId));
+  return (
+    "merchant_" +
+    Array.from(new Uint8Array(hash))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+      .slice(0, 24)
+  );
+}
+export function validateMutationOrigin(request: Request) {
+  if (["GET", "HEAD", "OPTIONS"].includes(request.method)) return;
+  const origin = request.headers.get("origin");
+  if (origin && origin !== new URL(request.url).origin)
+    throw new HttpError(403, "Cross-origin write requests are not allowed.");
+}
+export async function verifyMojoToken(
+  token: string,
+  env: RuntimeEnv,
+): Promise<Identity> {
+  if (!env.MOJOAUTH_JWKS_URL || !env.MOJOAUTH_ISSUER || !env.MOJOAUTH_AUDIENCE)
+    throw new HttpError(
+      503,
+      "Configure MojoAuth JWKS URL, issuer and audience first.",
+    );
+  const parts = token.split(".");
+  if (parts.length !== 3) throw new HttpError(401, "Invalid sign in token.");
+  let header: { alg: string; kid: string };
+  let claims: Record<string, unknown>;
+  try {
+    header = JSON.parse(new TextDecoder().decode(bytes(parts[0])));
+    claims = JSON.parse(new TextDecoder().decode(bytes(parts[1])));
+  } catch {
+    throw new HttpError(401, "Invalid sign in token.");
+  }
+  if (header.alg !== "RS256")
+    throw new HttpError(401, "Unsupported sign in signature.");
+  const url = new URL(env.MOJOAUTH_JWKS_URL);
+  if (url.protocol !== "https:")
+    throw new HttpError(503, "MojoAuth key URL must use HTTPS.");
+  const response = await fetch(url, { signal: AbortSignal.timeout(7000) });
+  if (!response.ok)
+    throw new HttpError(503, "MojoAuth signing keys unavailable.");
+  const jwks = (await response.json()) as {
+    keys: (JsonWebKey & { kid?: string })[];
+  };
+  const jwk = jwks.keys.find((k) => k.kid === header.kid && k.kty === "RSA");
+  if (!jwk) throw new HttpError(401, "Unrecognized sign in key.");
+  const key = await crypto.subtle.importKey(
+    "jwk",
+    jwk,
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["verify"],
+  );
+  const valid = await crypto.subtle.verify(
+    "RSASSA-PKCS1-v1_5",
+    key,
+    bytes(parts[2]),
+    encoder.encode(parts[0] + "." + parts[1]),
+  );
+  const now = Math.floor(Date.now() / 1000);
+  const audience = claims.aud;
+  if (
+    !valid ||
+    typeof claims.exp !== "number" ||
+    claims.exp <= now ||
+    (typeof claims.nbf === "number" && claims.nbf > now + 30) ||
+    claims.iss !== env.MOJOAUTH_ISSUER ||
+    !(
+      audience === env.MOJOAUTH_AUDIENCE ||
+      (Array.isArray(audience) && audience.includes(env.MOJOAUTH_AUDIENCE))
+    ) ||
+    typeof claims.sub !== "string"
+  )
+    throw new HttpError(401, "Your sign in expired or could not be verified.");
+  return {
+    id: "mojo:" + claims.sub,
+    email: String(claims.email ?? ""),
+    name: String(claims.name ?? claims.email ?? "Merchant"),
+    provider: "mojoauth",
+    email_verified: claims.email_verified === true,
+  };
+}
+async function signSessionPart(payload: string, secret: string) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  return b64(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, encoder.encode(payload)),
+    ),
+  );
+}
+export async function makeSessionCookie(identity: Identity, env: RuntimeEnv) {
+  if (!env.SESSION_SECRET || env.SESSION_SECRET.length < 32)
+    throw new HttpError(503, "Set a session secret of at least 32 characters.");
+  const payload = b64(
+    encoder.encode(
+      JSON.stringify({
+        ...identity,
+        exp: Math.floor(Date.now() / 1000) + 3600 * 8,
+      }),
+    ),
+  );
+  return `ring_session=${payload}.${await signSessionPart(payload, env.SESSION_SECRET)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=28800`;
+}
+export async function identityFromRequest(
+  request: Request,
+  env: RuntimeEnv,
+): Promise<Identity> {
+  const session = request.headers
+    .get("cookie")
+    ?.split(";")
+    .map((s) => s.trim())
+    .find((s) => s.startsWith("ring_session="))
+    ?.slice(13);
+  if (session && env.SESSION_SECRET) {
+    const [payload, sig] = session.split(".");
+    if (
+      payload &&
+      sig &&
+      (await signSessionPart(payload, env.SESSION_SECRET)) === sig
+    ) {
+      try {
+        const user = JSON.parse(new TextDecoder().decode(bytes(payload)));
+        if (user.exp > Date.now() / 1000 && typeof user.id === "string")
+          return user;
+      } catch {
+        /* continue to verified auth */
+      }
+    }
+  }
+  const bearer = request.headers.get("authorization");
+  if (bearer?.startsWith("Bearer ") && env.MOJOAUTH_JWKS_URL)
+    return verifyMojoToken(bearer.slice(7), env);
+  const hostname = new URL(request.url).hostname.toLowerCase();
+  const trustSitesHeaders =
+    env.TRUST_SITES_HEADERS === "true" ||
+    (env.TRUST_SITES_HEADERS !== "false" && hostname.endsWith(".chatgpt.site"));
+  const hostedId = trustSitesHeaders
+    ? request.headers.get("oai-authenticated-user-id")
+    : null;
+  if (hostedId) {
+    const email = request.headers.get("oai-authenticated-user-email") ?? "";
+    let name = request.headers.get("oai-authenticated-user-full-name") ?? "";
+    try {
+      if (
+        request.headers.get("oai-authenticated-user-full-name-encoding") ===
+        "percent-encoded-utf-8"
+      )
+        name = decodeURIComponent(name);
+    } catch {
+      name = "";
+    }
+    return {
+      id: "sites:" + hostedId,
+      email,
+      name: name || email.split("@")[0] || "Merchant",
+      provider: "sites",
+      email_verified: true,
+    };
+  }
+  if (
+    ["localhost", "127.0.0.1", "[::1]"].includes(hostname) &&
+    !env.MOJOAUTH_JWKS_URL &&
+    env.DEMO_MODE !== "false"
+  )
+    return {
+      id: "local-ring-orden-demo",
+      email: "hello@ringorden.demo",
+      name: "Alex Morgan",
+      provider: "local-demo",
+      email_verified: true,
+    };
+  throw new HttpError(401, "Please sign in to access your merchant workspace.");
+}
+export async function sha256Hex(value: string): Promise<string> {
+  return Array.from(
+    new Uint8Array(
+      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)),
+    ),
+  )
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+export function newInvitationToken(): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(32)))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}

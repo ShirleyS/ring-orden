@@ -1,0 +1,93 @@
+{
+  "name": "Ring Orden \u2014 B \u2014 Confirm Order",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ring-orden/confirm-order",
+        "authentication": "headerAuth",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "0378bcdd-9d1c-49f2-b0cc-4d1a79e4bb9c",
+      "name": "Authenticated webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "340e7a86-5353-4576-acbf-808432b1b1e0",
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Ring Orden inbound webhook secret"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.RING_ORDEN_API_ORIGIN + \"/api/tools/confirm_order\" }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body || $json) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "0c5348f4-d18a-4d6a-aa59-4aaa09141446",
+      "name": "Ring Orden authoritative backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Ring Orden service bearer token"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {
+        "content": "## Confirm Order\nRequire confirmed:true and a server-created session_id. Core validates availability and authoritative pricing before confirmation. Delivery is persisted before providers run.\n\nConfigure RING_ORDEN_API_ORIGIN as an n8n project variable. Configure both named Header Auth credentials; never paste secrets into this JSON. This workflow is inactive on import.",
+        "height": 240,
+        "width": 560
+      },
+      "id": "c1b2c0a6-de3e-440a-87ae-50b5218aeac2",
+      "name": "Setup notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -280
+      ]
+    }
+  ],
+  "connections": {
+    "Authenticated webhook": {
+      "main": [
+        [
+          {
+            "node": "Ring Orden authoritative backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none"
+  },
+  "tags": []
+}

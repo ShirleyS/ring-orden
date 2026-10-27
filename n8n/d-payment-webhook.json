@@ -1,0 +1,75 @@
+{
+  "name": "Ring Orden \u2014 D \u2014 Verified Payment Event",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ring-orden/verified-payment",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "8d3afa30-0279-42f6-92dd-21bc7b2fbc0a",
+      "name": "Verified backend event",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "9f5ea82c-79f1-4772-bbe6-b426c9be8a03",
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Ring Orden verified event secret"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const event = $json.body || $json;\nif (event.type !== \"payment.paid\" || !event.order_id || !event.merchant_id) throw new Error(\"Expected a verified backend payment event\");\nreturn [{ json: { ...event, observed_at: new Date().toISOString(), source: \"ring-orden-verified-backend\" } }];"
+      },
+      "id": "e660a7d1-90da-4510-89d9-38146719aa3d",
+      "name": "Record verified payment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Stripe signature boundary\nStripe sends its original raw body directly to /api/webhooks/stripe. The backend verifies HMAC, session ID, amount, currency and event idempotency before updating PAID. It can then emit this authenticated event. Do not point Stripe directly at this n8n webhook. Extend this flow with your merchant notification or accounting steps.",
+        "width": 600,
+        "height": 240
+      },
+      "id": "a9f99f64-79a6-4f66-ab38-1471df6152b7",
+      "name": "Setup notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -280
+      ]
+    }
+  ],
+  "connections": {
+    "Verified backend event": {
+      "main": [
+        [
+          {
+            "node": "Record verified payment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  }
+}

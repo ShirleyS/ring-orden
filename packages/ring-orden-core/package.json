@@ -1,0 +1,12 @@
+{
+  "name": "@ring-orden/core",
+  "version": "0.1.0",
+  "description": "Validated, deterministic transaction operations for voice commerce",
+  "type": "module",
+  "license": "MIT",
+  "exports": "./src/index.ts",
+  "files": ["src", "schemas", "examples", "README.md", "LICENSE"],
+  "engines": {"node": ">=22.13.0"},
+  "dependencies": {"zod": "3.25.76"},
+  "scripts": {"test": "node --experimental-strip-types --test tests/*.test.ts", "example": "node --experimental-strip-types examples/order.ts"}
+}

@@ -1,0 +1,10 @@
+{
+  "name": "@ring-orden/openmodel-gateway",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "exports": "./src/index.ts",
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

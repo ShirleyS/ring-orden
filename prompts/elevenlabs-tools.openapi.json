@@ -1,0 +1,440 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Ring Orden ElevenLabs server tools",
+    "version": "0.1.0",
+    "description": "Configure AGENT_TOOL_SECRET and AGENT_MERCHANT_ID server-side. Never accept merchant_id from the caller. Replace BASE_URL in your ElevenLabs integration with the deployed API origin. Header Authorization: Bearer <AGENT_TOOL_SECRET>. The secret must never be spoken or exposed to browser clients."
+  },
+  "servers": [
+    {
+      "url": "https://YOUR_RING_ORDEN_HOST"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "agentBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "paths": {
+    "/api/tools/create_session": {
+      "post": {
+        "operationId": "create_session",
+        "description": "Start or recover a merchant-scoped ordering session.",
+        "security": [
+          {
+            "agentBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "conversation_id": {
+                    "type": "string"
+                  },
+                  "customer_phone": {
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative merchant-scoped tool result"
+          },
+          "401": {
+            "description": "Invalid server agent credential"
+          },
+          "404": {
+            "description": "Session not found for configured merchant"
+          },
+          "409": {
+            "description": "Operation cannot be applied to current order"
+          }
+        }
+      }
+    },
+    "/api/tools/get_business_info": {
+      "post": {
+        "operationId": "get_business_info",
+        "description": "Read authoritative merchant information, hours and ordering rules.",
+        "security": [
+          {
+            "agentBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative merchant-scoped tool result"
+          },
+          "401": {
+            "description": "Invalid server agent credential"
+          },
+          "404": {
+            "description": "Session not found for configured merchant"
+          },
+          "409": {
+            "description": "Operation cannot be applied to current order"
+          }
+        }
+      }
+    },
+    "/api/tools/get_menu": {
+      "post": {
+        "operationId": "get_menu",
+        "description": "Read authoritative menu products, modifiers, availability and prices.",
+        "security": [
+          {
+            "agentBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative merchant-scoped tool result"
+          },
+          "401": {
+            "description": "Invalid server agent credential"
+          },
+          "404": {
+            "description": "Session not found for configured merchant"
+          },
+          "409": {
+            "description": "Operation cannot be applied to current order"
+          }
+        }
+      }
+    },
+    "/api/tools/get_order_state": {
+      "post": {
+        "operationId": "get_order_state",
+        "description": "Read the saved order and authoritative summary.",
+        "security": [
+          {
+            "agentBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "session_id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative merchant-scoped tool result"
+          },
+          "401": {
+            "description": "Invalid server agent credential"
+          },
+          "404": {
+            "description": "Session not found for configured merchant"
+          },
+          "409": {
+            "description": "Operation cannot be applied to current order"
+          }
+        }
+      }
+    },
+    "/api/tools/process_order_turn": {
+      "post": {
+        "operationId": "process_order_turn",
+        "description": "Interpret the exact caller words and persist validated transaction operations.",
+        "security": [
+          {
+            "agentBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string"
+                  },
+                  "utterance": {
+                    "type": "string",
+                    "maxLength": 2000
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "description": "Unique ID for this customer turn; reuse only when retrying the same turn."
+                  }
+                },
+                "required": [
+                  "session_id",
+                  "utterance",
+                  "request_id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative merchant-scoped tool result"
+          },
+          "401": {
+            "description": "Invalid server agent credential"
+          },
+          "404": {
+            "description": "Session not found for configured merchant"
+          },
+          "409": {
+            "description": "Operation cannot be applied to current order"
+          }
+        }
+      }
+    },
+    "/api/tools/confirm_order": {
+      "post": {
+        "operationId": "confirm_order",
+        "description": "Confirm only after repeating the final summary and receiving explicit current consent.",
+        "security": [
+          {
+            "agentBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string"
+                  },
+                  "utterance": {
+                    "type": "string"
+                  },
+                  "confirmed": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "description": "Unique ID for this customer turn; reuse only when retrying the same turn."
+                  }
+                },
+                "required": [
+                  "session_id",
+                  "utterance",
+                  "confirmed",
+                  "request_id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative merchant-scoped tool result"
+          },
+          "401": {
+            "description": "Invalid server agent credential"
+          },
+          "404": {
+            "description": "Session not found for configured merchant"
+          },
+          "409": {
+            "description": "Operation cannot be applied to current order"
+          }
+        }
+      }
+    },
+    "/api/tools/get_pickup_options": {
+      "post": {
+        "operationId": "get_pickup_options",
+        "description": "Read valid pickup options.",
+        "security": [
+          {
+            "agentBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "session_id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative merchant-scoped tool result"
+          },
+          "401": {
+            "description": "Invalid server agent credential"
+          },
+          "404": {
+            "description": "Session not found for configured merchant"
+          },
+          "409": {
+            "description": "Operation cannot be applied to current order"
+          }
+        }
+      }
+    },
+    "/api/tools/request_human": {
+      "post": {
+        "operationId": "request_human",
+        "description": "Request configured human handoff or callback escalation.",
+        "security": [
+          {
+            "agentBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "session_id",
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative merchant-scoped tool result"
+          },
+          "401": {
+            "description": "Invalid server agent credential"
+          },
+          "404": {
+            "description": "Session not found for configured merchant"
+          },
+          "409": {
+            "description": "Operation cannot be applied to current order"
+          }
+        }
+      }
+    },
+    "/api/tools/escalate_issue": {
+      "post": {
+        "operationId": "escalate_issue",
+        "description": "Preserve an unsupported or high-risk issue for merchant review.",
+        "security": [
+          {
+            "agentBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "session_id",
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative merchant-scoped tool result"
+          },
+          "401": {
+            "description": "Invalid server agent credential"
+          },
+          "404": {
+            "description": "Session not found for configured merchant"
+          },
+          "409": {
+            "description": "Operation cannot be applied to current order"
+          }
+        }
+      }
+    }
+  }
+}

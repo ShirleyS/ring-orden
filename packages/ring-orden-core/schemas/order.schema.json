@@ -1,0 +1,255 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ring Orden canonical transaction",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "merchant_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "external_reference": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "source": {
+      "enum": [
+        "voice",
+        "dashboard",
+        "demo"
+      ]
+    },
+    "currency": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 3
+    },
+    "customer": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 120
+        },
+        "phone": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 40
+        }
+      },
+      "required": [
+        "name",
+        "phone"
+      ],
+      "additionalProperties": false
+    },
+    "fulfillment": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": [
+            "pickup",
+            "dine_in"
+          ]
+        },
+        "scheduled_for": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "scheduled_for"
+      ],
+      "additionalProperties": false
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "line_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "catalog_item_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "unit_price": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "modifiers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "modifier_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1000
+                },
+                "price_delta": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000
+                }
+              },
+              "required": [
+                "modifier_id",
+                "name",
+                "price_delta"
+              ],
+              "additionalProperties": false
+            },
+            "maxItems": 50
+          }
+        },
+        "required": [
+          "line_id",
+          "catalog_item_id",
+          "name",
+          "quantity",
+          "unit_price",
+          "modifiers"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 50
+    },
+    "subtotal": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    "tax": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    "fees": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    "total": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    "status": {
+      "enum": [
+        "DRAFT",
+        "AWAITING_CLARIFICATION",
+        "AWAITING_CONFIRMATION",
+        "CONFIRMED",
+        "PAYMENT_PENDING",
+        "PAID",
+        "POS_SYNC_PENDING",
+        "POS_SYNCED",
+        "POS_SYNC_FAILED",
+        "PREPARING",
+        "READY",
+        "COMPLETED",
+        "CANCELLED",
+        "REFUND_PENDING",
+        "REFUNDED",
+        "ESCALATED"
+      ]
+    },
+    "payment_status": {
+      "enum": [
+        "PENDING",
+        "PAID",
+        "PAYMENT_ERROR",
+        "REFUND_PENDING",
+        "REFUNDED"
+      ]
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 1000
+      },
+      "maxItems": 30
+    },
+    "clarification": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 1000
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "id",
+    "merchant_id",
+    "external_reference",
+    "source",
+    "currency",
+    "customer",
+    "fulfillment",
+    "items",
+    "subtotal",
+    "tax",
+    "fees",
+    "total",
+    "status",
+    "payment_status",
+    "notes",
+    "revision",
+    "created_at",
+    "updated_at"
+  ],
+  "additionalProperties": false
+}

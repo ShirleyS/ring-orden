@@ -1,0 +1,124 @@
+{
+  "name": "Ring Orden \u2014 E \u2014 POS Retry",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ring-orden/pos-retry",
+        "authentication": "headerAuth",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "da073d5c-2637-4d43-a501-00359758d6d2",
+      "name": "Authenticated webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "bf2d7b8d-5531-400f-8944-e6511c29d7b2",
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Ring Orden inbound webhook secret"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.RING_ORDEN_API_ORIGIN + \"/api/tools/retry_failed_pos\" }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body || $json) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "855f6e91-bcb9-442d-9db3-18bc6a70dbc5",
+      "name": "Ring Orden authoritative backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Ring Orden service bearer token"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {
+        "content": "## POS Retry\nRetry up to ten failed POS deliveries using stable provider idempotency keys.\n\nConfigure RING_ORDEN_API_ORIGIN as an n8n project variable. Configure both named Header Auth credentials; never paste secrets into this JSON. This workflow is inactive on import.\n\nAutomatic schedule runs every minute after you publish this inactive workflow. The backend claims due FAILED orders, applies exponential backoff and caps attempts at the merchant retry limit (default 3).",
+        "height": 240,
+        "width": 560
+      },
+      "id": "ece1b13c-bc38-456a-b179-6626b94f4b5d",
+      "name": "Setup notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "32bc6a3a-9d23-4842-9c08-8256938eb296",
+      "name": "Every minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        160
+      ]
+    }
+  ],
+  "connections": {
+    "Authenticated webhook": {
+      "main": [
+        [
+          {
+            "node": "Ring Orden authoritative backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every minute": {
+      "main": [
+        [
+          {
+            "node": "Ring Orden authoritative backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none"
+  },
+  "tags": []
+}
