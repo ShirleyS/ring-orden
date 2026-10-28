@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import {
   browserPhoneUrl,
+  handleBrowserPhonePopupClosed,
+  handleBrowserPhoneMuteRequest,
   readBrowserPhoneEvent,
 } from "../../packages/ring-orden-connect/src/browser-phone";
 
@@ -20,7 +22,7 @@ export interface BrowserPhoneFrameProps {
   muted: boolean;
   onStart: () => void;
   onStop: () => void;
-  onMute: (muted: boolean) => void;
+  onMute: (muted: boolean) => boolean;
   onVolume: (volume: number) => void;
   onMessage: (text: string) => boolean;
 }
@@ -133,7 +135,11 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
           current.current.onStop();
           break;
         case "call.mute.request":
-          current.current.onMute(message.muted);
+          handleBrowserPhoneMuteRequest(
+            message.muted,
+            current.current.onMute,
+            () => sendState(),
+          );
           break;
         case "call.volume.request":
           current.current.onVolume(message.volume);
@@ -152,18 +158,23 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
     };
     window.addEventListener("message", handle);
     const watchPopup = setInterval(() => {
-      if (!popup.current?.closed) return;
-      popup.current = null;
-      setInPopup(false);
-      setReady(iframeReady.current);
-      setBridge(
-        iframeReady.current
-          ? "Caller phone connected"
-          : "Popup closed; reconnecting embedded caller phone…",
+      handleBrowserPhonePopupClosed(
+        popup.current,
+        () => current.current.onStop(),
+        () => {
+          popup.current = null;
+          setInPopup(false);
+          setReady(iframeReady.current);
+          setBridge(
+            iframeReady.current
+              ? "Caller phone connected"
+              : "Popup closed; reconnecting embedded caller phone…",
+          );
+          configure(frame.current?.contentWindow);
+          sendState(frame.current?.contentWindow);
+          if (!iframeReady.current) waitForReady();
+        },
       );
-      configure(frame.current?.contentWindow);
-      sendState(frame.current?.contentWindow);
-      if (!iframeReady.current) waitForReady();
     }, 500);
     return () => {
       clearTimeout(handshakeTimer.current);

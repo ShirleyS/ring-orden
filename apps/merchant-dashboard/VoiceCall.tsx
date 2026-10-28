@@ -413,12 +413,14 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
                 try {
                   session.current.setMicMuted(next);
                   setMuted(next);
+                  return true;
                 } catch {
                   callbacks.current.notify(
                     "The microphone could not be changed. Please try again.",
                   );
                 }
               }
+              return false;
             }}
             onVolume={(volume) => {
               try {
