@@ -130,9 +130,16 @@ test("API never returns saved model or webhook secrets", async () => {
 test("live mode cannot simulate payment", async () => {
   const repo = new MemoryRepository();
   const client = makeClient(repo, "alice", { DEMO_MODE: "false" });
-  const order = (
-    await client("orders", "POST", { items: [{ catalog_item_id: "latte" }] })
-  ).data;
+  const configured = await client("settings", "PATCH", {
+    section: "agent",
+    values: { after_hours: "accept_orders" },
+  });
+  assert.equal(configured.status, 200, JSON.stringify(configured.data));
+  const created = await client("orders", "POST", {
+    items: [{ catalog_item_id: "latte" }],
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.data));
+  const order = created.data;
   assert.equal(
     (await client(`orders/${order.id}/action`, "POST", { action: "demo_pay" }))
       .status,
@@ -242,7 +249,14 @@ test("configured model repairs become memory only after customer confirms", asyn
       DEMO_MODE: "false",
       DEEPSEEK_API_KEY: "test-only-credential",
     });
-    const session = (await client("sessions", "POST", {})).data.id;
+    const configured = await client("settings", "PATCH", {
+      section: "agent",
+      values: { after_hours: "accept_orders" },
+    });
+    assert.equal(configured.status, 200, JSON.stringify(configured.data));
+    const created = await client("sessions", "POST", {});
+    assert.equal(created.status, 201, JSON.stringify(created.data));
+    const session = created.data.id;
     let result = await client(`sessions/${session}/turn`, "POST", {
       utterance: "Un late con abena",
     });

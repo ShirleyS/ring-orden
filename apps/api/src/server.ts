@@ -1990,7 +1990,29 @@ export async function handleRequest(
           ),
         );
       if (tool === "get_menu") return json({ catalog: state.catalog });
-      if (tool === "get_business_info") return json(state.merchant);
+      if (tool === "get_business_info") {
+        const business = state.settings.business;
+        const agent = state.settings.agent;
+        return json({
+          id: state.merchant.id,
+          name: state.merchant.name,
+          business_type: state.merchant.business_type,
+          address: state.merchant.address,
+          timezone: state.merchant.timezone,
+          currency: state.merchant.currency,
+          language: state.merchant.language,
+          ordering_phone: state.merchant.ordering_phone,
+          hours: business.hours ?? null,
+          schedule: business.schedule ?? null,
+          special_closures: business.special_closures ?? [],
+          order_rules: {
+            ...rules(state),
+            pickup_minutes: Number(agent.pickup_minutes ?? 15),
+            after_hours: String(agent.after_hours ?? "information_only"),
+            ordering_enabled: agent.enabled !== false,
+          },
+        });
+      }
       if (tool === "get_pickup_options")
         return json({
           type: "pickup",
@@ -2012,13 +2034,8 @@ export async function handleRequest(
       else if (tool === "confirm_order") {
         if (body.confirmed !== true)
           throw new HttpError(422, "Explicit customer confirmation required.");
-        result = await processTurn(
-          state,
-          session,
-          "Yes, confirm my order.",
-          env,
-          url.origin,
-        );
+        const utterance = z.string().min(1).max(1500).parse(body.utterance);
+        result = await processTurn(state, session, utterance, env, url.origin);
       } else if (["request_human", "escalate_issue"].includes(tool)) {
         let order = findOrder(state, session.order_id);
         order = applyOperation(

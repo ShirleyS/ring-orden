@@ -22,27 +22,40 @@
     "/api/tools/create_session": {
       "post": {
         "operationId": "create_session",
-        "description": "Start or recover a merchant-scoped ordering session.",
+        "description": "Create a merchant-scoped ordering session. Reuse the same request_id and body for retries. Recover a known session_id with get_order_state; conversation-ID lookup is not supported.",
         "security": [
           {
             "agentBearer": []
           }
         ],
         "requestBody": {
-          "required": false,
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
-                  "conversation_id": {
-                    "type": "string"
+                  "name": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "description": "Customer name when supplied by the caller."
                   },
-                  "customer_phone": {
-                    "type": "string"
+                  "phone": {
+                    "type": "string",
+                    "pattern": "^\\+\\d{8,15}$",
+                    "description": "Customer phone in international E.164 format, obtained from trusted caller metadata or explicitly provided by the customer."
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "pattern": "\\S",
+                    "description": "Stable unique ID for starting this call. Reuse the same ID and body if the request is retried; never generate a new ID for a retry."
                   }
                 },
-                "required": [],
+                "required": [
+                  "request_id"
+                ],
                 "additionalProperties": false
               }
             }
@@ -50,7 +63,7 @@
         },
         "responses": {
           "200": {
-            "description": "Authoritative merchant-scoped tool result"
+            "description": "Previously saved result for an identical request_id and body"
           },
           "401": {
             "description": "Invalid server agent credential"
@@ -60,6 +73,9 @@
           },
           "409": {
             "description": "Operation cannot be applied to current order"
+          },
+          "201": {
+            "description": "New authoritative merchant-scoped ordering session"
           }
         }
       }
@@ -205,11 +221,14 @@
                   },
                   "utterance": {
                     "type": "string",
-                    "maxLength": 2000
+                    "maxLength": 1500,
+                    "minLength": 1
                   },
                   "request_id": {
                     "type": "string",
-                    "description": "Unique ID for this customer turn; reuse only when retrying the same turn."
+                    "description": "Unique ID for this customer turn; reuse only when retrying the same turn.",
+                    "minLength": 1,
+                    "pattern": "\\S"
                   }
                 },
                 "required": [
@@ -258,7 +277,9 @@
                     "type": "string"
                   },
                   "utterance": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1500
                   },
                   "confirmed": {
                     "type": "boolean",
@@ -266,7 +287,9 @@
                   },
                   "request_id": {
                     "type": "string",
-                    "description": "Unique ID for this customer turn; reuse only when retrying the same turn."
+                    "description": "Unique ID for this customer turn; reuse only when retrying the same turn.",
+                    "minLength": 1,
+                    "pattern": "\\S"
                   }
                 },
                 "required": [

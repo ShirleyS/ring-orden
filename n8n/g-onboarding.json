@@ -13,10 +13,7 @@
       "name": "Authenticated webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [
-        0,
-        0
-      ],
+      "position": [0, 0],
       "webhookId": "c9866f98-6e47-4ae3-ab38-622fc959105e",
       "credentials": {
         "httpHeaderAuth": {
@@ -26,13 +23,24 @@
     },
     {
       "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\nconst body = input.body ?? input;\nif (!body || typeof body !== \"object\" || typeof body.request_id !== \"string\" || !body.request_id.trim() || body.request_id.length > 200) {\n  throw new Error(\"A stable request_id of 1–200 characters is required before creating a session\");\n}\nreturn [{ json: body }];"
+      },
+      "id": "validate-session-request",
+      "name": "Validate session request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [300, 0]
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "={{ $vars.RING_ORDEN_API_ORIGIN + \"/api/tools/create_session\" }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json.body || $json) }}",
+        "jsonBody": "={{ JSON.stringify($json) }}",
         "options": {
           "timeout": 30000
         }
@@ -41,10 +49,7 @@
       "name": "Ring Orden authoritative backend",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        300,
-        0
-      ],
+      "position": [600, 0],
       "credentials": {
         "httpHeaderAuth": {
           "name": "Ring Orden service bearer token"
@@ -56,7 +61,7 @@
     },
     {
       "parameters": {
-        "content": "## Onboarding\nInitialize a test session only after the authenticated merchant has completed account provisioning. Tenant is fixed by server AGENT_MERCHANT_ID.\n\nConfigure RING_ORDEN_API_ORIGIN as an n8n project variable. Configure both named Header Auth credentials; never paste secrets into this JSON. This workflow is inactive on import.",
+        "content": "## Onboarding\nCreate an ordering session only after the authenticated merchant has completed account provisioning. Tenant is fixed by server AGENT_MERCHANT_ID. Send name/phone when known and a stable request_id (1–200 characters); repeat the exact ID and body on retries. Missing IDs are rejected before the retrying backend request.\n\nConfigure RING_ORDEN_API_ORIGIN as an n8n project variable. Configure both named Header Auth credentials; never paste secrets into this JSON. This workflow is inactive on import.",
         "height": 240,
         "width": 560
       },
@@ -64,14 +69,22 @@
       "name": "Setup notes",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [
-        0,
-        -280
-      ]
+      "position": [0, -280]
     }
   ],
   "connections": {
     "Authenticated webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate session request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate session request": {
       "main": [
         [
           {
