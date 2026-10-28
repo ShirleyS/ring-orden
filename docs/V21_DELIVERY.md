@@ -28,6 +28,8 @@ n8n source: I — Durable Customer Follow-up, inactive. The imported draft uses 
 
 Deployment: API source deployed to the existing ring-orden-api-shirleys project. The private merchant deployment and hosted Lovable customer app were not replaced by this increment. The agent's live greeting was already Spanish; its Tools screen showed no attached tools, and no post-call webhook was configured. A workspace secret was saved by the user and the first tool form prepared, but provider UI has not confirmed attachment. Do not claim the full live call journey works.
 
+Private merchant preview was created at https://6ae23b3160433bdc17fdf5cf--ring-orden-shirleys.netlify.app . It loaded the shell but displayed a workspace bootstrap error; it was not promoted to production. Packaging/runtime and preview environment need investigation. The n8n draft was imported at https://shirleys.app.n8n.cloud/workflow/dOwxBkk7vSwicPpM and contains the intended nine nodes, with the provider endpoint visibly unconfigured. It remains inactive.
+
 ## Tests and evidence
 
 400 tests passed in the full suite after integration; typecheck passed. Dashboard production build passed. SQL tests execute actual migrations/RPCs using PGlite. Browser tests used real local API handlers with synthetic data for profile/preferences, manager/staff boundaries, receipts, optional-email billing, verification, invalid/replaced fragments and responsive styling. These are not live-provider certification.
@@ -43,6 +45,7 @@ Screenshots are in ignored outputs/ui-verification. The new n8n draft screenshot
 5. PAC integration/CFDI issuance, secure invoice documents, completed customer export/erasure, automated retention and a full consent-management product remain unfinished. These are not represented as working.
 6. The additional numbered n8n workflows have not received node-level review. Their classification remains unverified; preserve them until audited.
 7. Existing direct backend WhatsApp delivery remains in place until the n8n replacement is verified. The older payment-event receiver is preserved; the new outbox does not claim to replace every older asynchronous side effect.
+8. Independent review identified and helped fix invoice confirmation, reorder session assignment and verification renewal/polling issues. Its final pass stopped at the account usage limit. The complete implementation has not received a finished independent production review.
 
 ## Provider references
 
