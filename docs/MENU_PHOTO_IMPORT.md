@@ -10,11 +10,12 @@ Nothing is added during extraction. Owner-confirmed products are committed as on
 
 Set `FIRECRAWL_API_KEY` as a server-only Netlify production Functions environment variable and redeploy. The connected Firecrawl account in chat is separate from the app's runtime credential. The upload section reports when the app's credential is missing. No Firecrawl key is exposed to the browser.
 
-This work did not read or change production credentials after the environment inspection was declined. A real extraction through the merchant deployment therefore still depends on its configured runtime key.
+The production Firecrawl key is configured. The Menu upload section includes an owner-only connection check that verifies this credential against Firecrawl and reports remaining credits. Firecrawl is also listed on the Integrations page. The key itself is never returned to the browser.
 
 ## Endpoints
 
 - `GET /api/menu/image/status`: owner-only connection presence check.
+- `POST /api/integrations/firecrawl/test`: owner-only live authentication and credit check. It returns only connection state and remaining credits, never the credential.
 - `POST /api/menu/image/preview`: owner-only multipart `file`; returns editable candidates, warnings and workspace currency; no catalog mutation.
 - `POST /api/menu/import`: owner-only `{items, request_id?}`; validates the complete batch before changing the available catalog.
 
@@ -22,6 +23,6 @@ This work did not read or change production credentials after the environment in
 
 The demo can show a tangible path from a photographed restaurant menu to orderable products. Review is essential: the first synthetic live parser test incorrectly treated a description as an additional free item. The stricter prompt returned the correct two products. Server normalization also requires human confirmation for any zero/unclear extracted price.
 
-Validation: 423 automated tests, TypeScript checking and the Netlify production build passed. The live Firecrawl synthetic document test returned Latte at MXN 78 and Croissant at MXN 65, with the latte description attached to its product. Browser drag-and-drop and a restaurant's real menu photo have not yet been checked in the live merchant UI.
+Validation: 426 automated tests, TypeScript checking and the Netlify production build passed. The live Firecrawl synthetic document test returned Latte at MXN 78 and Croissant at MXN 65, with the latte description attached to its product. Browser drag-and-drop and a restaurant's real menu photo have not yet been checked in the live merchant UI.
 
 References: https://docs.firecrawl.dev/api-reference/endpoint/parse and https://docs.firecrawl.dev/advanced-scraping-guide

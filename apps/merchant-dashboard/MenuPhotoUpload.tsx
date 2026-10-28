@@ -70,6 +70,30 @@ export default function MenuPhotoUpload({
   onImported: (count: number) => Promise<void>;
 }) {
   const [configured, setConfigured] = useState<boolean | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [connection, setConnection] = useState<{
+    message: string;
+    remaining_credits: number | null;
+  } | null>(null);
+  async function checkConnection() {
+    setChecking(true);
+    setError("");
+    setConnection(null);
+    try {
+      const result = await api<{
+        message: string;
+        remaining_credits: number | null;
+      }>("/integrations/firecrawl/test", "POST", {});
+      setConnection(result);
+      setConfigured(true);
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Connection check failed. Try again.",
+      );
+    } finally {
+      setChecking(false);
+    }
+  }
   const [rows, setRows] = useState<Row[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [error, setError] = useState("");
@@ -130,9 +154,15 @@ export default function MenuPhotoUpload({
     setError("");
   }
   async function readPhoto(file: File | undefined) {
-    if (!file || busy) return;
+    if (!file || busy || checking) return;
     setError("");
     setSuccess(null);
+    if (connection?.remaining_credits === 0) {
+      setError(
+        "Firecrawl has no credits left. Add credits to read menu photos.",
+      );
+      return;
+    }
     if (configured === false) {
       setError(
         "Menu photo reading needs Firecrawl setup in your hosting settings.",
@@ -236,7 +266,17 @@ export default function MenuPhotoUpload({
             review what gets added.
           </p>
         </div>
-        <span className="menu-photo-provider">Read with Firecrawl</span>
+        <div className="menu-photo-connection">
+          <span className="menu-photo-provider">Read with Firecrawl</span>
+          <button
+            type="button"
+            className="text-button"
+            disabled={!!busy || checking}
+            onClick={() => void checkConnection()}
+          >
+            {checking ? "Checking connection…" : "Check connection"}
+          </button>
+        </div>
       </div>
       <input
         ref={fileInput}
@@ -249,7 +289,7 @@ export default function MenuPhotoUpload({
       <button
         type="button"
         className={"menu-photo-drop " + (dragging ? "dragging" : "")}
-        disabled={!!busy}
+        disabled={!!busy || checking}
         onClick={() => fileInput.current?.click()}
         onDragOver={(event) => {
           event.preventDefault();
@@ -278,6 +318,21 @@ export default function MenuPhotoUpload({
         </strong>
         <span>JPG, PNG or WebP · Up to 6 MB · One menu page at a time</span>
       </button>
+      {connection && (
+        <div className="info-banner" role="status">
+          <CheckCircle2 size={17} />
+          <p>
+            {connection.message}
+            {connection.remaining_credits !== null && (
+              <strong>
+                {" "}
+                {connection.remaining_credits.toLocaleString()} credits
+                remaining.
+              </strong>
+            )}
+          </p>
+        </div>
+      )}
       {configured === false && (
         <p className="menu-photo-note">
           Menu photo reading needs a Firecrawl connection. Add FIRECRAWL_API_KEY

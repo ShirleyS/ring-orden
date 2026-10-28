@@ -230,6 +230,14 @@ function integrations(env: RuntimeEnv, state: TenantState) {
           : "setup_required",
     },
     {
+      id: "firecrawl",
+      name: "Firecrawl",
+      category: "Menu import",
+      description: "Read menu photos into reviewed products",
+      configured: Boolean(env.FIRECRAWL_API_KEY),
+      status: env.FIRECRAWL_API_KEY ? "configured" : "setup_required",
+    },
+    {
       id: "mojoauth",
       name: "MojoAuth",
       category: "Authentication",
@@ -2174,6 +2182,58 @@ export async function handleRequest(
           account_status: account.status,
           message:
             "Account credentials checked. WhatsApp sender approval and recipient opt-in are verified separately.",
+        };
+      } else if (path[1] === "firecrawl") {
+        let response: Response;
+        try {
+          response = await fetch(
+            "https://api.firecrawl.dev/v2/team/credit-usage",
+            {
+              headers: { Authorization: `Bearer ${env.FIRECRAWL_API_KEY}` },
+              redirect: "error",
+              signal: AbortSignal.timeout(8000),
+            },
+          );
+        } catch {
+          throw new HttpError(
+            504,
+            "Firecrawl did not respond. Try the connection check again.",
+          );
+        }
+        if (response.status === 401 || response.status === 403)
+          throw new HttpError(
+            503,
+            "Firecrawl rejected this site's key. Update the Firecrawl credential in hosting settings.",
+          );
+        if (!response.ok)
+          throw new HttpError(
+            502,
+            "Firecrawl could not verify the connection. Please try again.",
+          );
+        const credits = (await response.json().catch(() => null)) as {
+          success?: boolean;
+          data?: { remainingCredits?: unknown };
+        } | null;
+        if (!credits || credits.success === false)
+          throw new HttpError(
+            502,
+            "Firecrawl could not verify the connection. Please try again.",
+          );
+        const remaining =
+          typeof credits.data?.remainingCredits === "number" &&
+          Number.isFinite(credits.data.remainingCredits) &&
+          credits.data.remainingCredits >= 0
+            ? credits.data.remainingCredits
+            : null;
+        result = {
+          provider: "firecrawl",
+          connected: true,
+          status: "connected",
+          remaining_credits: remaining,
+          message:
+            remaining === 0
+              ? "Firecrawl is connected, but has no credits left. Add credits to read menu photos."
+              : "Firecrawl is connected. Menu photo reading is ready to try.",
         };
       } else if (path[1] === "deepseek") {
         result = {
