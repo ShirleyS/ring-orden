@@ -62,7 +62,18 @@ export interface Escalation {
   created_at: string;
   priority: string;
 }
+export interface MenuImportBatch {
+  id: string;
+  label: string;
+  source: "photo" | "csv" | "recovered";
+  created_at: string | null;
+  status: "active" | "unloaded";
+  unloaded_at?: string;
+  replaced_by?: string;
+  items: CatalogItem[];
+}
 export interface TenantState {
+  menu_imports?: MenuImportBatch[];
   followup_consents?: Record<
     string,
     Partial<

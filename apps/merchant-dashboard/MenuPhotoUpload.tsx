@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   ImagePlus,
   UploadCloud,
@@ -8,7 +8,7 @@ import {
   AlertCircle,
   X,
 } from "lucide-react";
-import { api } from "./types";
+import { api, type MenuImportSummary } from "./types";
 import { supabaseAccessToken } from "./supabase-auth";
 
 type Draft = {
@@ -18,7 +18,11 @@ type Draft = {
   description: string;
   available: boolean;
 };
-type Row = Omit<Draft, "price"> & { price: string; included: boolean };
+type Row = Omit<Draft, "price"> & {
+  price: string;
+  included: boolean;
+  selectionManual: boolean;
+};
 type Extraction = { items: Draft[]; warnings: string[]; currency: string };
 
 async function normalizePhoto(file: File): Promise<Blob> {
@@ -62,11 +66,13 @@ async function normalizePhoto(file: File): Promise<Blob> {
 }
 export default function MenuPhotoUpload({
   currency,
-  existingNames,
+  existingProducts,
+  imports,
   onImported,
 }: {
   currency: string;
-  existingNames: string[];
+  existingProducts: { id: string; name: string }[];
+  imports: MenuImportSummary[];
   onImported: (count: number) => Promise<void>;
 }) {
   const [configured, setConfigured] = useState<boolean | null>(null);
@@ -103,8 +109,16 @@ export default function MenuPhotoUpload({
   const [fileName, setFileName] = useState("");
   const [success, setSuccess] = useState<number | null>(null);
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
+  const [importMode, setImportMode] = useState("add");
+  const [replaceIds, setReplaceIds] = useState<string[]>([]);
+  const [confirmReplacement, setConfirmReplacement] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const modeId = useId();
+  const confirmationRef = useRef<HTMLDivElement>(null);
   const request = useRef<AbortController | null>(null);
+  useEffect(() => {
+    if (confirmReplacement) confirmationRef.current?.focus();
+  }, [confirmReplacement]);
   useEffect(() => {
     let active = true;
     api<{ configured: boolean }>("/menu/image/status")
@@ -127,7 +141,26 @@ export default function MenuPhotoUpload({
   );
   const key = (name: string) =>
     name.trim().normalize("NFC").toLocaleLowerCase();
-  const existing = new Set(existingNames.map(key));
+  const activeImports = imports.filter((entry) => entry.status === "active");
+  const replacements = activeImports.filter((entry) =>
+    replaceIds.includes(entry.id),
+  );
+  const replacedItemIds = new Set(
+    replacements.flatMap((entry) => entry.item_ids),
+  );
+  const replacedCount = replacements.reduce(
+    (count, entry) => count + entry.active_count,
+    0,
+  );
+  const allSelectionChanged =
+    importMode === "all" &&
+    (activeImports.length !== replaceIds.length ||
+      activeImports.some((entry) => !replaceIds.includes(entry.id)));
+  const existing = new Set(
+    existingProducts
+      .filter((item) => !replacedItemIds.has(item.id))
+      .map((item) => key(item.name)),
+  );
   const selected = rows.filter((row) => row.included);
   const selectedNames = new Set<string>();
   let validation = "";
@@ -146,10 +179,61 @@ export default function MenuPhotoUpload({
       validation = `${row.name || "This product"} is already in your menu or selected twice. Uncheck it or change its name.`;
     selectedNames.add(name);
   }
+  if (
+    importMode !== "add" &&
+    (!replaceIds.length || replacements.length !== replaceIds.length)
+  )
+    validation =
+      "This upload selection has changed. Choose the uploads to replace again.";
+  if (allSelectionChanged)
+    validation =
+      "Your active uploads have changed. Update the selection before replacing them.";
+  function changeMode(mode: string) {
+    const ids =
+      mode === "add"
+        ? []
+        : mode === "all"
+          ? activeImports.map((entry) => entry.id)
+          : [mode.slice("upload:".length)];
+    const excluded = new Set(
+      activeImports
+        .filter((entry) => ids.includes(entry.id))
+        .flatMap((entry) => entry.item_ids),
+    );
+    const seen = new Set(
+      existingProducts
+        .filter((item) => !excluded.has(item.id))
+        .map((item) => key(item.name)),
+    );
+    setRows((prior) =>
+      prior.map((row) => {
+        const included = row.selectionManual
+          ? row.included
+          : !!row.price.trim() && !seen.has(key(row.name));
+        if (included) seen.add(key(row.name));
+        return { ...row, included };
+      }),
+    );
+    setImportMode(mode);
+    setReplaceIds(ids);
+    setConfirmReplacement(false);
+    setRequestId(crypto.randomUUID());
+    setError("");
+  }
   function update(index: number, changes: Partial<Row>) {
     setRows((prior) =>
-      prior.map((row, i) => (i === index ? { ...row, ...changes } : row)),
+      prior.map((row, i) =>
+        i === index
+          ? {
+              ...row,
+              ...changes,
+              selectionManual:
+                changes.included !== undefined ? true : row.selectionManual,
+            }
+          : row,
+      ),
     );
+    setConfirmReplacement(false);
     setRequestId(crypto.randomUUID());
     setError("");
   }
@@ -174,6 +258,9 @@ export default function MenuPhotoUpload({
     setBusy("reading");
     setRows([]);
     setWarnings([]);
+    setImportMode("add");
+    setReplaceIds([]);
+    setConfirmReplacement(false);
     try {
       const blob = await normalizePhoto(file);
       if (controller.signal.aborted) return;
@@ -198,7 +285,7 @@ export default function MenuPhotoUpload({
           result.error || "This menu could not be read. Try a clearer photo.",
         );
       const data = result as Extraction;
-      const seen = new Set(existing);
+      const seen = new Set(existingProducts.map((item) => key(item.name)));
       setRows(
         data.items.map((item) => {
           const duplicate = seen.has(key(item.name));
@@ -207,6 +294,7 @@ export default function MenuPhotoUpload({
             ...item,
             price: item.price === null ? "" : String(item.price),
             included: !duplicate && item.price !== null,
+            selectionManual: false,
           };
         }),
       );
@@ -224,11 +312,18 @@ export default function MenuPhotoUpload({
   }
   async function addProducts() {
     if (busy || validation || !selected.length) return;
+    if (replaceIds.length && !confirmReplacement) {
+      setConfirmReplacement(true);
+      return;
+    }
     setBusy("saving");
     setError("");
     try {
       const result = await api<{ count: number }>("/menu/import", "POST", {
         request_id: requestId,
+        source: "photo",
+        label: fileName.slice(0, 180),
+        replace_import_ids: replaceIds,
         items: selected.map((row) => ({
           name: row.name.trim(),
           category: row.category.trim(),
@@ -241,6 +336,9 @@ export default function MenuPhotoUpload({
       setWarnings([]);
       setPreview("");
       setSuccess(result.count);
+      setConfirmReplacement(false);
+      setImportMode("add");
+      setReplaceIds([]);
       await onImported(result.count);
     } catch (e) {
       setError(
@@ -391,20 +489,63 @@ export default function MenuPhotoUpload({
             <h3>Review {rows.length} products</h3>
             <span>Prices in {currency}</span>
           </div>
+          <div className="menu-photo-import-mode">
+            <label htmlFor={modeId}>
+              How should this photo update your menu?
+            </label>
+            <select
+              id={modeId}
+              value={importMode}
+              disabled={!!busy}
+              onChange={(event) => changeMode(event.target.value)}
+            >
+              <option value="add">Add products</option>
+              <option value="all" disabled={!activeImports.length}>
+                Replace all active uploads
+              </option>
+              {activeImports.map((entry) => (
+                <option key={entry.id} value={`upload:${entry.id}`}>
+                  Replace {entry.label} ({entry.active_count} products)
+                </option>
+              ))}
+              {importMode.startsWith("upload:") &&
+                !activeImports.some(
+                  (entry) => `upload:${entry.id}` === importMode,
+                ) && (
+                  <option value={importMode}>Upload no longer active</option>
+                )}
+            </select>
+            <p>
+              {replaceIds.length
+                ? `Unload ${replacedCount} current products from ${replacements.map((entry) => `“${entry.label}”`).join(", ")} and add ${selected.length} reviewed products. Manually added products and past orders stay in place. You can restore the old upload later.`
+                : "Add selected products alongside your current menu."}
+            </p>
+            {allSelectionChanged && (
+              <button
+                type="button"
+                className="secondary"
+                disabled={!!busy}
+                onClick={() => changeMode("all")}
+              >
+                Update selection
+              </button>
+            )}
+          </div>
           {warnings.map((warning, i) => (
             <p className="menu-photo-warning" key={i}>
               {warning}
             </p>
           ))}
           <p className="menu-photo-note">
-            Choose what to add. Unclear prices and existing products start
-            unchecked.
+            Choose what to add. Unclear prices and products already in the
+            remaining menu start unchecked. Your name and price edits stay when
+            you change the upload selection.
           </p>
           <div className="table-scroll">
             <table>
               <thead>
                 <tr>
-                  <th>ADD</th>
+                  <th>INCLUDE</th>
                   <th>PRODUCT NAME</th>
                   <th>CATEGORY</th>
                   <th>PRICE · {currency}</th>
@@ -479,29 +620,78 @@ export default function MenuPhotoUpload({
               {validation}
             </p>
           )}
+          {confirmReplacement && !validation && (
+            <div
+              ref={confirmationRef}
+              tabIndex={-1}
+              className="menu-upload-confirmation"
+              role="group"
+              aria-label="Confirm upload replacement"
+            >
+              <strong>
+                Replace {replacedCount} current products with {selected.length}{" "}
+                reviewed products?
+              </strong>
+              <p>
+                Products from{" "}
+                {replacements.map((entry) => `“${entry.label}”`).join(", ")}{" "}
+                will leave your active menu. Manually added products and past
+                orders stay in place. The old uploads remain in history so you
+                can restore them later.
+              </p>
+              <div className="menu-upload-confirm-actions">
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={!!busy}
+                  onClick={() => setConfirmReplacement(false)}
+                >
+                  Cancel replacement
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={!!busy || !selected.length}
+                  onClick={() => void addProducts()}
+                >
+                  {busy === "saving" && (
+                    <Loader2 size={16} className="menu-photo-spinner" />
+                  )}
+                  {busy === "saving"
+                    ? "Replacing products…"
+                    : `Confirm replacement · ${selected.length} products`}
+                </button>
+              </div>
+            </div>
+          )}
           <div className="menu-photo-actions">
             <p>
               Review every price. Selected products will be marked available.
             </p>
-            <button
-              type="button"
-              className="primary"
-              disabled={!!busy || !!validation || !selected.length}
-              onClick={() => void addProducts()}
-            >
-              {busy === "saving" ? (
-                <>
-                  <Loader2 size={16} className="menu-photo-spinner" />
-                  Adding products…
-                </>
-              ) : (
-                <>
-                  <ImagePlus size={16} />
-                  Add {selected.length}{" "}
-                  {selected.length === 1 ? "product" : "products"} to menu
-                </>
-              )}
-            </button>
+            {!confirmReplacement && (
+              <button
+                type="button"
+                className="primary"
+                disabled={!!busy || !!validation || !selected.length}
+                onClick={() => void addProducts()}
+              >
+                {busy === "saving" ? (
+                  <>
+                    <Loader2 size={16} className="menu-photo-spinner" />
+                    {replaceIds.length
+                      ? "Replacing products…"
+                      : "Adding products…"}
+                  </>
+                ) : (
+                  <>
+                    <ImagePlus size={16} />
+                    {replaceIds.length
+                      ? "Review replacement"
+                      : `Add ${selected.length} ${selected.length === 1 ? "product" : "products"} to menu`}
+                  </>
+                )}
+              </button>
+            )}
           </div>
         </div>
       )}

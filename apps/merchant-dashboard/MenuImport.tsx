@@ -19,7 +19,11 @@ import {
 
 export interface MenuImportProps {
   onClose: () => void;
-  onImport: (items: MenuCSVItem[]) => Promise<void>;
+  onImport: (
+    items: MenuCSVItem[],
+    sourceName?: string,
+    requestId?: string,
+  ) => Promise<void>;
 }
 const SAMPLE_CSV =
   'name,price,category,description,available\r\nIced Latte,78,Coffee,"House espresso, milk and ice",true\r\nChocolate Croissant,75,Bakery,Buttery pastry with dark chocolate,true\r\nUbe Croissant,80,Bakery,Our signature purple ube cream,false\r\n';
@@ -38,6 +42,7 @@ export function MenuImport({ onClose, onImport }: MenuImportProps) {
   const [saveError, setSaveError] = useState("");
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [requestId, setRequestId] = useState(() => crypto.randomUUID());
   const fileRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const headingId = useId();
@@ -91,6 +96,7 @@ export function MenuImport({ onClose, onImport }: MenuImportProps) {
     setFileError("");
     setSaveError("");
     setStage("source");
+    setRequestId(crypto.randomUUID());
   }
   async function loadFile(file: File | undefined) {
     if (!file) return;
@@ -122,13 +128,13 @@ export function MenuImport({ onClose, onImport }: MenuImportProps) {
     setBusy(true);
     setSaveError("");
     try {
-      await onImport(result.items);
+      await onImport(result.items, fileName || "Pasted CSV", requestId);
       onClose();
     } catch (error) {
       setSaveError(
         error instanceof Error
           ? error.message
-          : "Import stopped. Some items may have been added. Check your menu before trying again.",
+          : "Your menu could not be imported. Please try again.",
       );
     } finally {
       setBusy(false);
@@ -426,7 +432,7 @@ export function MenuImport({ onClose, onImport }: MenuImportProps) {
             <button
               type="button"
               className="primary"
-              disabled={busy || !!saveError}
+              disabled={busy}
               onClick={() => void importItems()}
             >
               {busy ? (
