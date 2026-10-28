@@ -26,6 +26,9 @@ export const normalize = (s: string) =>
     .replace(/\s+/g, " ")
     .trim();
 export function isExplicitConfirmation(utterance: string): boolean {
+  // Exact consent phrases only. Negation, questions and uncertain Chinese text fail closed.
+  const chinese = utterance.trim().replace(/[，,。.!！\s]/g, "");
+  if (/^(?:(?:是的|对))?(?:请)?(?:确认(?:订单|下单)|下单)$/.test(chinese)) return true;
   const text = normalize(utterance);
   return (
     /^(yes|si|correct|confirmed|looks good|yes please|si por favor|place my order)$/.test(

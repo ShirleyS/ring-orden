@@ -5,6 +5,8 @@ import type {
 } from "../../../packages/ring-orden-core/src/index.ts";
 import type { CorrectionMemory } from "../../../packages/ring-orden-memory/src/index.ts";
 import type { BillingSubmission } from "./customer-receipts.ts";
+import type { CustomerMemoryState } from "./customer-memory.ts";
+import type { AutomationState } from "./customer-automation.ts";
 export type JsonObject = Record<string, unknown>;
 export interface Turn {
   id: string;
@@ -17,6 +19,7 @@ export interface Turn {
   memories_used?: string[];
 }
 export interface Session {
+  provider_conversation_id?: string;
   id: string;
   order_id: string;
   turns: Turn[];
@@ -69,7 +72,36 @@ export interface Escalation {
   created_at: string;
   priority: string;
 }
+export interface MenuImportBatch {
+  id: string;
+  label: string;
+  source: "photo" | "csv" | "recovered";
+  created_at: string | null;
+  status: "active" | "unloaded";
+  unloaded_at?: string;
+  replaced_by?: string;
+  items: CatalogItem[];
+}
 export interface TenantState {
+  menu_imports?: MenuImportBatch[];
+  followup_consents?: Record<
+    string,
+    Partial<
+      Record<
+        "receipt" | "recovery",
+        {
+          session_id: string;
+          purpose: "receipt" | "recovery";
+          consent: boolean;
+          recorded_at: string;
+          status?: string;
+        }
+      >
+    >
+  >;
+  ended_conversations?: string[];
+  customer_memory?: CustomerMemoryState;
+  customer_automation?: AutomationState;
   merchant: {
     id: string;
     name: string;

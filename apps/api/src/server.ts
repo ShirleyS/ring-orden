@@ -1,11 +1,19 @@
 import { z } from "zod";
 import {
+  listMenuImports,
+  addMenuImport,
+  unloadMenuImport,
+  restoreMenuImport,
+} from "./menu-imports.ts";
+import { extractMenuPhoto, ReviewedMenuItemSchema } from "./menu-image.ts";
+import {
   createOrder,
   applyOperation,
   applyOperations,
   transitionOrder,
   priceOrder,
   CatalogItemSchema,
+  OperationSchema,
 } from "../../../packages/ring-orden-core/src/index.ts";
 import type {
   Order,
@@ -35,8 +43,10 @@ import {
   validateMutationOrigin,
   verifyMojoToken,
   makeSessionCookie,
+  linkMojoIdentity,
   sha256Hex,
   newInvitationToken,
+  configuredAgentSecret,
   HttpError,
 } from "./auth.ts";
 import type { RuntimeEnv, Identity } from "./auth.ts";
@@ -57,6 +67,30 @@ import {
   sendPendingCustomerReceipt,
   receiptRetryAllowed,
 } from "./customer-receipt-delivery.ts";
+import { configureElevenLabsTools } from "./elevenlabs-setup.ts";
+import {
+  handleCustomerTool,
+  handleCustomerMerchant,
+  normalizePhone,
+  issueCustomerVerificationChallenge,
+  readCustomerVerificationTenant,
+  completeCustomerVerification,
+} from "./customer-memory.ts";
+import {
+  handleAutomationTool,
+  queueCustomerVerification,
+  issueRecoveryLink,
+} from "./customer-automation.ts";
+import {
+  handleCustomerCapability,
+  issueCustomerCapabilityLink,
+  revokeCustomerCapabilityLink,
+} from "./customer-capabilities.ts";
+import {
+  handleElevenLabsEvent,
+  queueCompletedReceipts,
+  saveFollowupConsent,
+} from "./followup-events.ts";
 import {
   handleCustomerOrderRequest,
   issueCustomerOrderLink,
@@ -216,6 +250,14 @@ function integrations(env: RuntimeEnv, state: TenantState) {
           : "setup_required",
     },
     {
+      id: "firecrawl",
+      name: "Firecrawl",
+      category: "Menu import",
+      description: "Read menu photos into reviewed products",
+      configured: Boolean(env.FIRECRAWL_API_KEY),
+      status: env.FIRECRAWL_API_KEY ? "configured" : "setup_required",
+    },
+    {
       id: "mojoauth",
       name: "MojoAuth",
       category: "Authentication",
@@ -270,6 +312,7 @@ function bootstrap(
     storage: storageStatus(env),
     merchant: state.merchant,
     catalog: state.catalog,
+    menu_imports: role === "OWNER" ? listMenuImports(state) : [],
     orders: state.orders.map((o) => metadata(state, o)),
     memories: state.memories,
     calls: state.sessions.map((s) => ({
@@ -684,6 +727,8 @@ async function processTurn(
   session: Session,
   utterance: string,
   env: RuntimeEnv,
+  _origin = "",
+  proposedOperations?: Operation[],
 ) {
   let order = findOrder(state, session.order_id);
   const wasConfirmed = [
@@ -729,7 +774,10 @@ async function processTurn(
     };
   };
   let model = "Demo interpreter";
-  if (isDemo(env) && !key)
+  if (proposedOperations) {
+    result = { operations: proposedOperations, reply: "" };
+    model = "Voice tool structured operations";
+  } else if (isDemo(env) && !key)
     result = interpretDemo(utterance, order, state.catalog, memory);
   else {
     if (
@@ -1111,6 +1159,74 @@ async function stripeWebhook(
   }
   return json({ received: true });
 }
+async function handleCustomerVerificationRequest(
+  request: Request,
+  env: RuntimeEnv,
+  repo: Repository,
+): Promise<Response> {
+  let origin: string;
+  try {
+    const parsed = new URL(String(env.CUSTOMER_APP_ORIGIN));
+    const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(
+      parsed.hostname,
+    );
+    if (
+      (parsed.protocol !== "https:" &&
+        !(loopback && parsed.protocol === "http:")) ||
+      parsed.username ||
+      parsed.password ||
+      parsed.pathname !== "/" ||
+      parsed.search ||
+      parsed.hash
+    )
+      throw new Error();
+    origin = parsed.origin;
+  } catch {
+    throw new HttpError(503, "Customer verification is not configured.");
+  }
+  if (request.headers.get("Origin") !== origin)
+    throw new HttpError(403, "Customer origin is not allowed.");
+  const headers = {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    Vary: "Origin",
+    "Referrer-Policy": "no-referrer",
+  };
+  if (new URL(request.url).pathname !== "/api/customer/verify")
+    return json({ error: "Endpoint not found." }, 404, headers);
+  if (request.method === "OPTIONS")
+    return new Response(null, { status: 204, headers });
+  if (
+    request.method !== "POST" ||
+    new URL(request.url).pathname !== "/api/customer/verify"
+  )
+    return json({ error: "Endpoint not found." }, 404, headers);
+  try {
+    const body = await bodyOf(request);
+    const token = z.string().min(80).max(1600).parse(body.token);
+    const merchantId = readCustomerVerificationTenant(token);
+    const stored = await repo.loadByMerchant(merchantId);
+    if (!stored)
+      throw new HttpError(401, "This verification link is invalid or expired.");
+    const result = await completeCustomerVerification(stored.state, token);
+    if (!(await repo.saveTrusted(merchantId, stored.revision, stored.state)))
+      throw new HttpError(409, "Another update arrived. Please try again.");
+    return json(result, 200, headers);
+  } catch (error) {
+    return json(
+      {
+        error:
+          error instanceof HttpError
+            ? error.message
+            : "This verification link is invalid or expired.",
+      },
+      error instanceof HttpError ? error.status : 401,
+      headers,
+    );
+  }
+}
+
 export async function handleRequest(
   request: Request,
   env: RuntimeEnv = {},
@@ -1127,6 +1243,10 @@ export async function handleRequest(
     const method = request.method;
     if (path[0] === "customer") {
       const repo = repository ?? repositoryFor(env);
+      if (path[1] === "verify")
+        return await handleCustomerVerificationRequest(request, env, repo);
+      const capability = await handleCustomerCapability(request, env, repo);
+      if (capability) return capability;
       return handleCustomerOrderRequest(request, env, repo, {
         rules,
         orderingAllowed,
@@ -1144,30 +1264,61 @@ export async function handleRequest(
         status: 204,
         headers: { Allow: "GET, POST, PATCH, DELETE, OPTIONS" },
       });
-    if (!repository) await prepareSupabaseMigration(env);
-    const repo = repository ?? repositoryFor(env);
-    if (path[0] === "webhooks" && path[1] === "stripe")
-      return await stripeWebhook(request, env, repo);
-    validateMutationOrigin(request);
+    if (path[0] === "auth") validateMutationOrigin(request);
+    if (path[0] === "auth" && path[1] === "config" && method === "GET") {
+      const configured = Boolean(
+        env.MOJOAUTH_ISSUER &&
+          env.MOJOAUTH_AUDIENCE &&
+          env.MOJOAUTH_JWKS_URL &&
+          env.SESSION_SECRET,
+      );
+      return json(
+        configured
+          ? {
+              provider: "mojoauth",
+              issuer: env.MOJOAUTH_ISSUER,
+              clientId: env.MOJOAUTH_AUDIENCE,
+            }
+          : { provider: null },
+      );
+    }
     if (path[0] === "auth" && path[1] === "session" && method === "POST") {
       const body = await bodyOf(request);
-      const user = await verifyMojoToken(
+      const verified = await verifyMojoToken(
         z.string().min(20).parse(body.access_token),
         env,
       );
+      const user = await linkMojoIdentity(verified, env);
       return json({ user }, 200, {
         "Set-Cookie": await makeSessionCookie(user, env),
       });
     }
+    if (path[0] === "auth" && path[1] === "logout")
+      return json({ ok: true }, 200, {
+        "Set-Cookie":
+          "ring_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0",
+      });
+    if (!repository) await prepareSupabaseMigration(env);
+    const repo = repository ?? repositoryFor(env);
+    if (path[0] === "webhooks" && path[1] === "stripe")
+      return await stripeWebhook(request, env, repo);
+    if (
+      path[0] === "webhooks" &&
+      path[1] === "elevenlabs" &&
+      path.length === 2 &&
+      method === "POST"
+    )
+      return await handleElevenLabsEvent(request, env, repo);
+    validateMutationOrigin(request);
     let trustedTool = false;
     let identity: Identity;
     let merchantId: string;
     let role: MerchantRole = "OWNER";
     if (path[0] === "tools") {
       if (
-        !env.AGENT_TOOL_SECRET ||
+        !configuredAgentSecret(env) ||
         request.headers.get("authorization") !==
-          `Bearer ${env.AGENT_TOOL_SECRET}` ||
+          `Bearer ${configuredAgentSecret(env)}` ||
         !env.AGENT_MERCHANT_ID
       )
         throw new HttpError(401, "Invalid agent tool authentication.");
@@ -1277,8 +1428,36 @@ export async function handleRequest(
     if (!stored)
       throw new HttpError(503, "Merchant workspace could not be initialized.");
     const state = stored.state;
+    // Recover legacy upload provenance before any later mutation can prune old request-cache entries.
+    listMenuImports(state);
     if (method === "GET") {
       if (!trustedTool) guardMerchantRoute(role, path, method);
+      if (path[0] === "customers") {
+        const result = handleCustomerMerchant(state, path, method, {}, role);
+        // Recognition may materialize records from canonical order contacts.
+        const saved = await repo.save(
+          merchantId,
+          identity.id,
+          stored.revision,
+          state,
+        );
+        if (!saved)
+          throw new HttpError(
+            409,
+            "Another update just arrived. Please try again.",
+          );
+        return json(result);
+      }
+      if (path[0] === "menu" && path[1] === "image" && path[2] === "status") {
+        if (role !== "OWNER")
+          throw new HttpError(403, "Only the owner can import products.");
+        return json({ configured: Boolean(env.FIRECRAWL_API_KEY) });
+      }
+      if (path[0] === "menu" && path[1] === "imports" && path.length === 2) {
+        if (role !== "OWNER")
+          throw new HttpError(403, "Only the owner can manage menu uploads.");
+        return json({ imports: listMenuImports(state) });
+      }
       if (path[0] === "bootstrap") {
         const workspace = bootstrap(state, identity, env, role);
         workspace.orders = workspace.orders.map((order) =>
@@ -1363,6 +1542,22 @@ export async function handleRequest(
         });
       throw new HttpError(404, "Endpoint not found.");
     }
+    if (
+      path[0] === "menu" &&
+      path[1] === "image" &&
+      path[2] === "preview" &&
+      method === "POST"
+    ) {
+      if (trustedTool || role !== "OWNER")
+        throw new HttpError(403, "Only the owner can import products.");
+      return json(
+        await extractMenuPhoto(
+          request,
+          env.FIRECRAWL_API_KEY ?? "",
+          state.merchant.currency || "MXN",
+        ),
+      );
+    }
     const body = await bodyOf(request);
     if (!trustedTool) guardMerchantRoute(role, path, method, body);
     let result: unknown;
@@ -1372,10 +1567,10 @@ export async function handleRequest(
       (typeof body.request_id === "string" ? body.request_id : undefined);
     // A capability URL is returned only once; never retain it in the response cache.
     const issuesCustomerLink =
-      method === "POST" &&
-      ((path[0] === "orders" &&
-        ["customer-link", "receipt-link"].includes(path[2])) ||
-        (path[0] === "tools" && path[1] === "customer_link"));
+      path[0] === "customers" ||
+      (method === "POST" &&
+        ((path[0] === "orders" && ["customer-link", "receipt-link"].includes(path[2])) ||
+          (path[0] === "tools" && path[1] === "customer_link")));
     const requestKey =
       requestId && !issuesCustomerLink
         ? `${identity.id}:${method}:${url.pathname}:${requestId}`
@@ -1431,6 +1626,31 @@ export async function handleRequest(
         order: metadata(latest!.state, findOrder(latest!.state, order.id)),
         notification,
       });
+    }
+    if (path[0] === "customers") {
+      if (path[2] === "verification-link" && method === "POST") {
+        if (role !== "OWNER")
+          throw new HttpError(
+            403,
+            "Only the owner may issue verification links.",
+          );
+        const session = state.sessions.find((s) => s.id === body.session_id);
+        if (!session) throw new HttpError(404, "Conversation not found.");
+        const context = (await handleCustomerTool(
+          state,
+          "get_customer_context",
+          {},
+          session,
+          env,
+        )) as Record<string, unknown>;
+        if (context.customer_id !== path[1])
+          throw new HttpError(
+            404,
+            "Customer does not match this conversation.",
+          );
+        result = await issueCustomerVerificationChallenge(state, session, env);
+        status = 201;
+      } else result = handleCustomerMerchant(state, path, method, body, role);
     } else if (
       path[0] === "orders" &&
       path.length === 3 &&
@@ -1461,6 +1681,7 @@ export async function handleRequest(
           "Only the owner can manage customer order links.",
         );
       const order = findOrder(state, path[1]);
+      if (path[2] === "receipt-link") {
       result =
         method === "DELETE"
           ? path[2] === "receipt-link"
@@ -1469,6 +1690,31 @@ export async function handleRequest(
           : await (path[2] === "receipt-link"
               ? issueCustomerReceiptLink(state, order, env)
               : issueCustomerOrderLink(state, order, env));
+      } else {
+      const purpose = z
+        .enum(["order", "recovery", "receipt", "billing"])
+        .parse(body.purpose ?? "order");
+      if (method === "DELETE")
+        result =
+          purpose === "receipt" || purpose === "billing"
+            ? revokeCustomerCapabilityLink(state, order.id, purpose)
+            : revokeCustomerOrderLink(state, order.id);
+      else if (purpose === "receipt" || purpose === "billing") {
+        if (
+          purpose === "receipt" &&
+          (order.status !== "COMPLETED" || order.payment_status !== "PAID")
+        )
+          throw new HttpError(
+            409,
+            "A receipt link is available after the paid order is completed.",
+          );
+        result = await issueCustomerCapabilityLink(state, order, purpose, env);
+      } else
+        result =
+          purpose === "recovery"
+            ? await issueRecoveryLink(state, order, env)
+            : await issueCustomerOrderLink(state, order, env);
+      }
       status = method === "POST" ? 201 : 200;
       audit(
         state,
@@ -1484,14 +1730,15 @@ export async function handleRequest(
     ) {
       const order = createOrder(merchantId);
       order.source = isDemo(env) ? "demo" : "voice";
+      const recognizedPhone = body.phone ? normalizePhone(body.phone) : null;
+      if (body.phone && !recognizedPhone)
+        throw new HttpError(
+          422,
+          "Use an international phone number beginning with +.",
+        );
       order.customer = {
         name: z.string().max(120).optional().parse(body.name) ?? null,
-        phone:
-          z
-            .string()
-            .regex(/^\+\d{8,15}$/)
-            .optional()
-            .parse(body.phone || undefined) ?? null,
+        phone: recognizedPhone,
       };
       order.external_reference = `RO-${1049 + state.orders.length - 14}`;
       replaceOrder(state, order);
@@ -1502,12 +1749,15 @@ export async function handleRequest(
       };
       const session: Session = {
         id: uid("session"),
+        ...(trustedTool && typeof body.request_id === "string"
+          ? { provider_conversation_id: body.request_id }
+          : {}),
         order_id: order.id,
         turns: [
           {
             id: uid("turn"),
             role: "assistant",
-            text: String(state.settings.agent.greeting),
+            text: `¡Hola! Gracias por llamar a ${state.merchant.name}. ¿Qué te gustaría pedir?`,
             created_at: new Date().toISOString(),
           },
         ],
@@ -1520,6 +1770,17 @@ export async function handleRequest(
         ...session,
         session_id: session.id,
         order: metadata(state, order),
+        customer_context: await handleCustomerTool(
+          state,
+          "get_customer_context",
+          {},
+          session,
+          env,
+        ),
+        language_policy: {
+          initial: "es-MX",
+          supported: ["es-MX", "en-US", "zh-CN"],
+        },
       };
       status = 201;
     } else if (
@@ -1715,6 +1976,7 @@ export async function handleRequest(
           sent.status.toUpperCase();
       }
       replaceOrder(state, order);
+      if (action === "complete") await queueCompletedReceipts(state, env);
       audit(
         state,
         "order.action",
@@ -1727,6 +1989,66 @@ export async function handleRequest(
         order: redactOrderForRole(metadata(state, order), role),
         ...(role === "OWNER" ? { checkout_url: checkoutUrl } : {}),
       };
+    } else if (
+      path[0] === "menu" &&
+      path[1] === "import" &&
+      method === "POST"
+    ) {
+      const batch = z
+        .object({
+          items: z.array(ReviewedMenuItemSchema).min(1).max(100),
+          request_id: z.string().uuid().optional(),
+          source: z.enum(["photo", "csv"]).default("photo"),
+          label: z.string().trim().min(1).max(180).optional(),
+          replace_import_ids: z
+            .array(z.string().min(1).max(160))
+            .max(100)
+            .default([]),
+        })
+        .strict()
+        .parse(body);
+      const added = batch.items.map((item) =>
+        CatalogItemSchema.parse({ ...item, id: uid("item"), modifiers: [] }),
+      );
+      const imported = addMenuImport(state, added, {
+        ...batch,
+        label:
+          batch.label ?? (batch.source === "csv" ? "CSV menu" : "Menu photo"),
+      });
+      audit(
+        state,
+        "menu.imported",
+        batch.replace_import_ids.length
+          ? "Menu uploads replaced"
+          : "Menu products added",
+        `${added.length} reviewed products added from ${imported.label}.`,
+      );
+      result = { items: added, count: added.length, import: imported };
+      status = 201;
+    } else if (
+      path[0] === "menu" &&
+      path[1] === "imports" &&
+      path.length === 4 &&
+      method === "POST" &&
+      ["unload", "restore"].includes(path[3])
+    ) {
+      z.object({ request_id: z.string().uuid().optional() })
+        .strict()
+        .parse(body);
+      result =
+        path[3] === "unload"
+          ? unloadMenuImport(state, path[2])
+          : restoreMenuImport(state, path[2]);
+      const changed = result as { import: { label: string }; count: number };
+      if (changed.count)
+        audit(
+          state,
+          `menu.${path[3]}`,
+          path[3] === "unload"
+            ? "Menu upload unloaded"
+            : "Menu upload restored",
+          `${changed.import.label}: ${changed.count} products`,
+        );
     } else if (path[0] === "menu" && method === "PATCH") {
       const index = state.catalog.findIndex((item) => item.id === path[1]);
       if (index < 0) throw new HttpError(404, "Menu item not found.");
@@ -1897,6 +2219,20 @@ export async function handleRequest(
       );
     } else if (
       path[0] === "integrations" &&
+      path[1] === "elevenlabs" &&
+      path[2] === "configure-tools" &&
+      method === "POST"
+    ) {
+      const configured = await configureElevenLabsTools(env, merchantId);
+      result = configured;
+      audit(
+        state,
+        "voice.tools_configured",
+        "ElevenLabs tools attached and verified",
+        `${configured.tools_attached} tools`,
+      );
+    } else if (
+      path[0] === "integrations" &&
       path[2] === "test" &&
       method === "POST"
     ) {
@@ -1985,6 +2321,58 @@ export async function handleRequest(
           latency_ms: Math.round(performance.now() - started),
           message:
             "Messaging credentials checked. WhatsApp sender approval and recipient opt-in are verified separately.",
+        };
+      } else if (path[1] === "firecrawl") {
+        let response: Response;
+        try {
+          response = await fetch(
+            "https://api.firecrawl.dev/v2/team/credit-usage",
+            {
+              headers: { Authorization: `Bearer ${env.FIRECRAWL_API_KEY}` },
+              redirect: "error",
+              signal: AbortSignal.timeout(8000),
+            },
+          );
+        } catch {
+          throw new HttpError(
+            504,
+            "Firecrawl did not respond. Try the connection check again.",
+          );
+        }
+        if (response.status === 401 || response.status === 403)
+          throw new HttpError(
+            503,
+            "Firecrawl rejected this site's key. Update the Firecrawl credential in hosting settings.",
+          );
+        if (!response.ok)
+          throw new HttpError(
+            502,
+            "Firecrawl could not verify the connection. Please try again.",
+          );
+        const credits = (await response.json().catch(() => null)) as {
+          success?: boolean;
+          data?: { remainingCredits?: unknown };
+        } | null;
+        if (!credits || credits.success === false)
+          throw new HttpError(
+            502,
+            "Firecrawl could not verify the connection. Please try again.",
+          );
+        const remaining =
+          typeof credits.data?.remainingCredits === "number" &&
+          Number.isFinite(credits.data.remainingCredits) &&
+          credits.data.remainingCredits >= 0
+            ? credits.data.remainingCredits
+            : null;
+        result = {
+          provider: "firecrawl",
+          connected: true,
+          status: "connected",
+          remaining_credits: remaining,
+          message:
+            remaining === 0
+              ? "Firecrawl is connected, but has no credits left. Add credits to read menu photos."
+              : "Firecrawl is connected. Menu photo reading is ready to try.",
         };
       } else if (path[1] === "deepseek") {
         result = {
@@ -2111,6 +2499,22 @@ export async function handleRequest(
       audit(state, "team.invited", "Invitation created", member.email);
     } else if (path[0] === "tools" && method === "POST") {
       const tool = path[1];
+      if (["claim_automation_jobs", "ack_automation_job"].includes(tool)) {
+        if (tool === "claim_automation_jobs")
+          await queueCompletedReceipts(state, env);
+        result = await handleAutomationTool(state, tool, body, env);
+        const saved = await repo.saveTrusted(
+          merchantId,
+          stored.revision,
+          state,
+        );
+        if (!saved)
+          throw new HttpError(
+            409,
+            "Another update just arrived. Please try again.",
+          );
+        return json(result);
+      }
       if (tool === "get_memory_context")
         return json({
           memories: retrieveMemories(state.memories, {
@@ -2172,6 +2576,53 @@ export async function handleRequest(
       const session = state.sessions.find((s) => s.id === body.session_id);
       if (!session)
         throw new HttpError(404, "Use a server-created session ID.");
+      let customerResult = await handleCustomerTool(
+        state,
+        tool,
+        body,
+        session,
+        env,
+      );
+      if (
+        tool === "verify_customer" &&
+        body.consent === true &&
+        (customerResult as Record<string, unknown>)?.verified !== true
+      ) {
+        customerResult = {
+          verification_required: true,
+          notification: await queueCustomerVerification(
+            state,
+            session,
+            true,
+            env,
+          ),
+          verified: false,
+        };
+      }
+      const automationResult =
+        customerResult === undefined
+          ? tool === "set_customer_followup_consent"
+            ? saveFollowupConsent(state, session, {
+                purpose: body.purpose,
+                consent: body.consent,
+                utterance: body.utterance,
+              })
+            : await handleAutomationTool(state, tool, body, env, session)
+          : undefined;
+      if (customerResult !== undefined || automationResult !== undefined) {
+        result = customerResult ?? automationResult;
+        const saved = await repo.saveTrusted(
+          merchantId,
+          stored.revision,
+          state,
+        );
+        if (!saved)
+          throw new HttpError(
+            409,
+            "Another update just arrived. Please try again.",
+          );
+        return json(result);
+      }
       if (tool === "get_order_state")
         return json(findOrder(state, session.order_id));
       if (tool === "customer_link") {
@@ -2181,6 +2632,33 @@ export async function handleRequest(
           env,
         );
         status = 201;
+      } else if (tool === "apply_order_operations") {
+        let operations: unknown;
+        try {
+          operations = JSON.parse(
+            z.string().min(2).max(20000).parse(body.operations_json),
+          );
+        } catch {
+          throw new HttpError(422, "Supply a valid operations_json array.");
+        }
+        const parsed = z
+          .array(OperationSchema)
+          .min(1)
+          .max(20)
+          .parse(operations);
+        if (parsed.some((op) => op.action === "confirm_order"))
+          throw new HttpError(
+            422,
+            "Use confirm_order after reading back the complete order and obtaining explicit confirmation.",
+          );
+        result = await processTurn(
+          state,
+          session,
+          z.string().min(1).max(1500).parse(body.utterance),
+          env,
+          url.origin,
+          parsed,
+        );
       } else if (tool === "process_order_turn")
         result = await processTurn(
           state,
@@ -2197,8 +2675,9 @@ export async function handleRequest(
           findOrder(state, session.order_id),
           z.boolean().optional().parse(body.whatsapp_receipt),
         );
-        result = await processTurn(state, session, utterance, env);
-
+        result = await processTurn(state, session, utterance, env, url.origin, [
+          { action: "confirm_order", confirmed: true },
+        ]);
       } else if (["request_human", "escalate_issue"].includes(tool)) {
         let order = findOrder(state, session.order_id);
         order = applyOperation(

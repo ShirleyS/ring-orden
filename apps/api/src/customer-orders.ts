@@ -171,8 +171,18 @@ export async function issueCustomerOrderLink(
   state: TenantState,
   order: Order,
   env: RuntimeEnv,
-  scope: "order" | "receipt" = "order",
+  scopeOrLifetime: "order" | "receipt" | number = "order",
 ) {
+  const scope = typeof scopeOrLifetime === "number" ? "order" : scopeOrLifetime;
+  const ttlMilliseconds = typeof scopeOrLifetime === "number"
+    ? scopeOrLifetime
+    : scope === "receipt" ? 7 * 86400_000 : 60 * 60_000;
+  if (
+    !Number.isFinite(ttlMilliseconds) ||
+    ttlMilliseconds <= 0 ||
+    (scope === "order" && ttlMilliseconds > 60 * 60_000)
+  )
+    throw new HttpError(422, "Invalid customer link lifetime.");
   const origin = customerOrigin(env);
   if (scope === "receipt" && draftStatuses.has(order.status))
     throw new HttpError(409, "Confirm this order before creating a receipt.");
@@ -202,9 +212,7 @@ export async function issueCustomerOrderLink(
     .replace(/=/g, "")
     .replace(/\+/g, "-")
     .replace(/\//g, "_");
-  const expires_at = new Date(
-    Date.now() + (scope === "receipt" ? 7 * 86400_000 : 60 * 60_000),
-  ).toISOString();
+  const expires_at = new Date(Date.now() + ttlMilliseconds).toISOString();
   state.order_metadata[order.id] ??= {
     pos_status: "DASHBOARD_ONLY",
     notification_status: "PENDING",

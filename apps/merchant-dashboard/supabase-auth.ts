@@ -16,6 +16,8 @@ export function clearBrowserSignIn() {
   localStorage.removeItem(SESSION_KEY);
 }
 
+export const clearSupabaseSession = clearBrowserSignIn;
+
 type BrowserSession = {
   access_token: string;
   refresh_token: string;

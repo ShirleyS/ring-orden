@@ -7,6 +7,18 @@ export function guardMerchantRoute(
   body?: Record<string, unknown>,
 ) {
   if (role === "OWNER") return;
+  if (path[0] === "customers") {
+    if (
+      role === "MANAGER" &&
+      path[2] !== "billing" &&
+      path[2] !== "verification-link"
+    )
+      return;
+    throw new HttpError(
+      403,
+      "Customer access requires an authorized owner or manager.",
+    );
+  }
   if (
     ["customer-link", "receipt-link", "receipt-send", "billing"].includes(
       path[2],
@@ -72,6 +84,7 @@ export function redactWorkspace(
     team: [],
     settings: {},
     integrations: [],
+    menu_imports: [],
   };
   if (role === "STAFF") {
     const orders = (result.orders as { status: string; id: string }[]).filter(

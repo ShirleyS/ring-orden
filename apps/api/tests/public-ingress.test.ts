@@ -4,6 +4,42 @@ import { handleRequest } from "../src/server.ts";
 import { MemoryRepository } from "../src/repository.ts";
 import { handlePublicIngress } from "../../../netlify/ingress.ts";
 
+test("configuration accepts copied bearer formatting but still requires the exact credential", async () => {
+  const { repository, env } = await fixture();
+  for (const secret of [
+    "Bearer ingress-test-secret",
+    " ingress-test-secret ",
+    '"Bearer ingress-test-secret"',
+  ]) {
+    for (const supplied of [
+      "Bearer ingress-test-secret",
+      "Bearer wrong-secret",
+      "Bearer Bearer ingress-test-secret",
+    ]) {
+      const response = await handlePublicIngress(
+        new Request("https://ring-api.test/api/automation/health", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: supplied,
+          },
+          body: "{}",
+        }),
+        { ...env, AGENT_TOOL_SECRET: secret },
+        repository,
+      );
+      assert.equal(
+        response.status,
+        supplied === "Bearer ingress-test-secret" ? 200 : 401,
+      );
+      assert.equal(
+        (await response.text()).includes("ingress-test-secret"),
+        false,
+      );
+    }
+  }
+});
+
 async function fixture() {
   const repository = new MemoryRepository();
   const bootstrap = await handleRequest(
@@ -42,7 +78,10 @@ test("public ingress serves only the configured merchant's allowlisted agent too
 
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("Cache-Control"), "no-store");
-  assert.equal(response.headers.get("Content-Security-Policy"), "default-src 'none'");
+  assert.equal(
+    response.headers.get("Content-Security-Policy"),
+    "default-src 'none'",
+  );
   assert.equal(response.headers.get("Referrer-Policy"), "no-referrer");
   const data = (await response.json()) as { id: string };
   assert.equal(data.id, env.AGENT_MERCHANT_ID);
@@ -97,4 +136,78 @@ test("public ingress requires the Supabase and agent tenant binding", async () =
     { AGENT_TOOL_SECRET: "secret" },
   );
   assert.equal(response.status, 503);
+});
+
+test("authenticated automation can check due POS retries without exposing merchant APIs", async () => {
+  const { repository, env } = await fixture();
+  const response = await handlePublicIngress(
+    new Request("https://ring-api.test/api/automation/retry_failed_pos", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer ingress-test-secret",
+        "content-type": "application/json",
+      },
+      body: "{}",
+    }),
+    env,
+    repository,
+  );
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+});
+
+test("automation refuses missing or incorrect service tokens", async () => {
+  const { repository, env } = await fixture();
+  for (const token of ["", "Bearer incorrect"]) {
+    const response = await handlePublicIngress(
+      new Request("https://ring-api.test/api/automation/retry_failed_pos", {
+        method: "POST",
+        headers: { authorization: token, "content-type": "application/json" },
+        body: "{}",
+      }),
+      env,
+      repository,
+    );
+    assert.equal(response.status, 401);
+  }
+});
+
+test("automation cannot route arbitrary backend operations", async () => {
+  const { repository, env } = await fixture();
+  for (const tool of ["orders", "settings", "team", "create_session"]) {
+    const response = await handlePublicIngress(
+      new Request("https://ring-api.test/api/automation/" + tool, {
+        method: "POST",
+        headers: {
+          authorization: "Bearer ingress-test-secret",
+          "content-type": "application/json",
+        },
+        body: "{}",
+      }),
+      env,
+      repository,
+    );
+    assert.equal(response.status, 404);
+  }
+});
+
+test("automation health verifies the service binding without disclosing merchant records", async () => {
+  const { repository, env } = await fixture();
+  const response = await handlePublicIngress(
+    new Request("https://ring-api.test/api/automation/health", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer ingress-test-secret",
+        "content-type": "application/json",
+      },
+      body: "{}",
+    }),
+    env,
+    repository,
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    status: "ok",
+    merchant_bound: true,
+  });
 });

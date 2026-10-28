@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Copy, Link, ShieldCheck } from "lucide-react";
 
 type LinkResult = { url?: string; expires_at?: string; revoked?: boolean };
+export type CustomerLinkPurpose = "order" | "recovery" | "receipt" | "billing";
 
 /** The raw customer credential lives only in this open dialog, never browser storage. */
 export default function CustomerOrderLink({
@@ -12,15 +13,22 @@ export default function CustomerOrderLink({
 }: {
   busy: boolean;
   expiresAt?: string;
-  onRequest: (method: "POST" | "DELETE") => Promise<LinkResult | undefined>;
+  onRequest: (
+    method: "POST" | "DELETE",
+    purpose?: CustomerLinkPurpose,
+  ) => Promise<LinkResult | undefined>;
 }) {
   const [created, setCreated] = useState<LinkResult>();
   const [message, setMessage] = useState("");
-  const active = !!expiresAt && Date.parse(expiresAt) > Date.now();
+  const [purpose, setPurpose] = useState<CustomerLinkPurpose>("order");
+  const active =
+    ["order", "recovery"].includes(purpose) &&
+    !!expiresAt &&
+    Date.parse(expiresAt) > Date.now();
 
   async function create() {
     setMessage("");
-    const result = await onRequest("POST");
+    const result = await onRequest("POST", purpose);
     if (result?.url) {
       setCreated(result);
       setMessage("Customer link ready. Share it only with this customer.");
@@ -28,7 +36,7 @@ export default function CustomerOrderLink({
   }
 
   async function revoke() {
-    const result = await onRequest("DELETE");
+    const result = await onRequest("DELETE", purpose);
     if (result?.revoked) {
       setCreated(undefined);
       setMessage("Customer link revoked.");
@@ -52,12 +60,29 @@ export default function CustomerOrderLink({
       style={{ marginTop: 24 }}
     >
       <h3>
-        <Link size={16} aria-hidden="true" /> Let the customer finish online
+        <Link size={16} aria-hidden="true" /> Customer links
       </h3>
       <p className="muted">
-        They can review this order, finish a draft and open checkout without
-        creating an account.
+        Share an order, receipt or billing form through your WhatsApp app.
       </p>
+      <label htmlFor="customer-link-purpose">
+        What does the customer need?
+      </label>
+      <select
+        id="customer-link-purpose"
+        value={purpose}
+        disabled={busy}
+        onChange={(event) => {
+          setPurpose(event.target.value as CustomerLinkPurpose);
+          setCreated(undefined);
+          setMessage("");
+        }}
+      >
+        <option value="order">Review and finish order</option>
+        <option value="recovery">Resume dropped call · 10 minutes</option>
+        <option value="billing">RFC / billing form</option>
+        <option value="receipt">Completed-order receipt</option>
+      </select>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button className="secondary" disabled={busy} onClick={create}>
           {active || created?.url
@@ -91,8 +116,9 @@ export default function CustomerOrderLink({
         </div>
       )}
       <p className="muted">
-        <ShieldCheck size={14} aria-hidden="true" /> Links expire after 60
-        minutes. Replacing a link stops the previous one from working.
+        <ShieldCheck size={14} aria-hidden="true" /> Links expire after{" "}
+        {purpose === "recovery" ? "10" : "60"} minutes. Keep links private.
+        Creating an order or recovery link replaces the previous order link.
       </p>
       <p role="status" aria-live="polite">
         {message}

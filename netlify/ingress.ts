@@ -1,4 +1,5 @@
 import type { RuntimeEnv } from "../apps/api/src/auth.ts";
+import { configuredAgentSecret } from "../apps/api/src/auth.ts";
 import { handleRequest } from "../apps/api/src/server.ts";
 import type { Repository } from "../apps/api/src/types.ts";
 
@@ -8,12 +9,32 @@ const agentTools = new Set([
   "get_menu",
   "get_order_state",
   "process_order_turn",
+  "apply_order_operations",
   "confirm_order",
   "get_pickup_options",
   "request_human",
   "escalate_issue",
+  "customer_link",
+  "get_customer_context",
+  "get_customer_preferences",
+  "update_customer_preference",
+  "get_previous_orders",
+  "reorder_previous_order",
+  "get_billing_profile_status",
+  "request_invoice",
+  "verify_customer",
+  "customer_followup",
+  "set_customer_followup_consent",
 ]);
 const maximumBodyBytes = 128 * 1024;
+const automationTools = new Set([
+  "health",
+  "retry_failed_pos",
+  "model_health",
+  "get_memory_context",
+  "claim_automation_jobs",
+  "ack_automation_job",
+]);
 
 function jsonError(status: number, error: string) {
   return Response.json(
@@ -31,11 +52,38 @@ function jsonError(status: number, error: string) {
   );
 }
 
-function ingressRoute(request: Request): "agent" | "stripe" | "health" | null {
+function ingressRoute(
+  request: Request,
+):
+  | "agent"
+  | "automation"
+  | "stripe"
+  | "elevenlabs"
+  | "health"
+  | "customer"
+  | null {
   const { pathname } = new URL(request.url);
   if (pathname === "/api/health" && request.method === "GET") return "health";
+  const customerMethods: Record<string, string[]> = {
+    "/api/customer/order": ["GET", "PATCH", "OPTIONS"],
+    "/api/customer/confirm": ["POST", "OPTIONS"],
+    "/api/customer/checkout": ["POST", "OPTIONS"],
+    "/api/customer/receipt": ["GET", "OPTIONS"],
+    "/api/customer/billing": ["GET", "POST", "PUT", "OPTIONS"],
+    "/api/customer/verify": ["POST", "OPTIONS"],
+  };
+  if (customerMethods[pathname]?.includes(request.method)) return "customer";
   if (pathname === "/api/webhooks/stripe" && request.method === "POST")
     return "stripe";
+  if (pathname === "/api/webhooks/elevenlabs" && request.method === "POST")
+    return "elevenlabs";
+  const automation = pathname.match(/^\/api\/automation\/([a-z_]+)$/)?.[1];
+  if (
+    request.method === "POST" &&
+    automation &&
+    automationTools.has(automation)
+  )
+    return "automation";
   const tool = pathname.match(/^\/api\/tools\/([a-z_]+)$/)?.[1];
   if (request.method === "POST" && tool && agentTools.has(tool)) return "agent";
   return null;
@@ -84,17 +132,29 @@ export async function handlePublicIngress(
 ): Promise<Response> {
   const route = ingressRoute(request);
   if (!route) return jsonError(404, "Endpoint not found.");
+  const serviceSecret = configuredAgentSecret(env);
+  if (
+    ["health", "agent", "automation"].includes(route) &&
+    env.AGENT_TOOL_SECRET &&
+    !serviceSecret
+  )
+    return jsonError(503, "AGENT_TOOL_SECRET configuration is invalid.");
+  env = { ...env, AGENT_TOOL_SECRET: serviceSecret };
 
   if (
     !env.SUPABASE_URL ||
     !env.SUPABASE_SERVER_SECRET ||
-    (route !== "health" && route === "agent" &&
+    ((route === "agent" || route === "automation") &&
       (!env.AGENT_TOOL_SECRET || !env.AGENT_MERCHANT_ID)) ||
-    (route === "stripe" && !env.STRIPE_WEBHOOK_SECRET)
+    (route === "stripe" && !env.STRIPE_WEBHOOK_SECRET) ||
+    (route === "elevenlabs" &&
+      (!env.ELEVENLABS_WEBHOOK_SECRET ||
+        !env.AGENT_MERCHANT_ID ||
+        !env.ELEVENLABS_AGENT_ID))
   )
     return jsonError(503, "Public API ingress is not configured.");
 
-  if (route !== "health") {
+  if (route !== "health" && !["GET", "OPTIONS"].includes(request.method)) {
     const contentType = request.headers.get("content-type") ?? "";
     if (!contentType.toLowerCase().startsWith("application/json"))
       return jsonError(415, "Content-Type must be application/json.");
@@ -120,8 +180,22 @@ export async function handlePublicIngress(
   for (const key of [...headers.keys()])
     if (key.toLowerCase().startsWith("oai-")) headers.delete(key);
 
+  const target = new URL(request.url);
+  if (route === "automation")
+    target.pathname =
+      target.pathname === "/api/automation/health"
+        ? "/api/tools/get_business_info"
+        : target.pathname.replace("/api/automation/", "/api/tools/");
+  const forwarded =
+    route === "automation"
+      ? new Request(target, {
+          method: request.method,
+          headers,
+          body: await request.arrayBuffer(),
+        })
+      : new Request(request, { headers });
   const response = await handleRequest(
-    new Request(request, { headers }),
+    forwarded,
     {
       ...env,
       DEMO_MODE: "false",
@@ -134,6 +208,16 @@ export async function handlePublicIngress(
   responseHeaders.set("Referrer-Policy", "no-referrer");
   responseHeaders.set("X-Frame-Options", "DENY");
   responseHeaders.set("X-Content-Type-Options", "nosniff");
+  if (
+    new URL(request.url).pathname === "/api/automation/health" &&
+    response.ok
+  ) {
+    await response.body?.cancel();
+    return Response.json(
+      { status: "ok", merchant_bound: true },
+      { headers: responseHeaders },
+    );
+  }
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,

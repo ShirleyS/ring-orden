@@ -59,12 +59,23 @@ import {
   Radio,
   FileText,
 } from "lucide-react";
-import { Obj, Workspace, money, label, time, api } from "./types";
+import {
+  Obj,
+  Workspace,
+  MenuImportSummary,
+  money,
+  label,
+  time,
+  api,
+} from "./types";
 import { Configuration, Onboarding } from "./Configuration";
 import MenuImport from "./MenuImport";
+import MenuPhotoUpload from "./MenuPhotoUpload";
+import MenuUploadHistory from "./MenuUploadHistory";
 import VoiceCall from "./VoiceCall";
 import CustomerOrderLink from "./CustomerOrderLink";
 import CustomerReceipt from "./CustomerReceipt";
+import Customers from "./Customers";
 import { confirmedOrders, inPeriod } from "./reporting";
 import {
   consumeSupabaseMagicLink,
@@ -79,6 +90,7 @@ const nav = [
       ["Overview", LayoutDashboard],
       ["Orders", ShoppingBag],
       ["Calls", Phone],
+      ["Customers", Users],
       ["Escalations", LifeBuoy],
       ["Language memory", BrainCircuit],
     ],
@@ -104,6 +116,7 @@ const allowedPages = (role: string) =>
           "Overview",
           "Orders",
           "Calls",
+          "Customers",
           "Escalations",
           "Language memory",
           "Menu",
@@ -112,6 +125,7 @@ const allowedPages = (role: string) =>
           "Overview",
           "Orders",
           "Calls",
+          "Customers",
           "Escalations",
           "Language memory",
           "Menu",
@@ -723,6 +737,7 @@ export default function MerchantApp() {
             </>
           ) : (
             <>
+              {page === "Customers" && <Customers role={data.user.role} />}
               {page === "Overview" && (
                 <Overview
                   data={data}
@@ -888,6 +903,13 @@ export default function MerchantApp() {
                 <MenuPage
                   canEdit={data.user.role === "OWNER"}
                   catalog={data.catalog}
+                  menuImports={data.menu_imports || []}
+                  onUploadsChanged={load}
+                  currency={data.merchant.currency || "MXN"}
+                  onPhotoImported={async (count) => {
+                    await load();
+                    notify(count + " products added from your menu photo.");
+                  }}
                   onEdit={(i) => {
                     setSelected(i);
                     setModal("menu");
@@ -1001,8 +1023,10 @@ export default function MerchantApp() {
           data={data}
           onClose={() => setSelected(null)}
           busy={busy}
-          onCustomerLink={(method) =>
-            action("/orders/" + currentOrder.id + "/customer-link", method, {})
+          onCustomerLink={(method, purpose) =>
+            action("/orders/" + currentOrder.id + "/customer-link", method, {
+              purpose,
+            })
           }
           onReceipt={(route, method, body) =>
             action(`/orders/${currentOrder.id}/${route}`, method, body)
@@ -1091,12 +1115,14 @@ export default function MerchantApp() {
       {modal === "import" && (
         <MenuImport
           onClose={() => setModal(null)}
-          onImport={async (items) => {
+          onImport={async (items, sourceName, requestId) => {
             const existing = new Set(
-              data.catalog.map((i) => i.name.toLowerCase().trim()),
+              data.catalog.map((i) =>
+                i.name.trim().normalize("NFC").toLocaleLowerCase(),
+              ),
             );
             const duplicate = items.find((i) =>
-              existing.has(i.name.toLowerCase().trim()),
+              existing.has(i.name.trim().normalize("NFC").toLocaleLowerCase()),
             );
             if (duplicate)
               throw new Error(
@@ -1104,22 +1130,16 @@ export default function MerchantApp() {
                   duplicate.name +
                   ". Remove duplicate rows before importing.",
               );
-            let count = 0;
-            for (const item of items) {
-              try {
-                await api("/menu", "POST", item);
-                count++;
-              } catch (e) {
-                await load();
-                throw new Error(
-                  count +
-                    " of " +
-                    items.length +
-                    " items were added. Check your menu and remove those rows before retrying. " +
-                    (e as Error).message,
-                );
-              }
-            }
+            const { count } = await api<{ count: number }>(
+              "/menu/import",
+              "POST",
+              {
+                items,
+                request_id: requestId,
+                source: "csv",
+                label: (sourceName || "Pasted CSV").slice(0, 180),
+              },
+            );
             await load();
             notify(count + " menu items imported.");
           }}
@@ -2068,18 +2088,26 @@ function MemoryPage({
 }
 function MenuPage({
   catalog,
+  menuImports,
+  onUploadsChanged,
   onEdit,
   onToggle,
   onAdd,
   onImport,
+  currency,
+  onPhotoImported,
   canEdit = true,
 }: {
   canEdit?: boolean;
   catalog: Obj[];
+  menuImports: MenuImportSummary[];
+  onUploadsChanged: () => Promise<void>;
   onEdit: (i: Obj) => void;
   onToggle: (i: Obj) => void;
   onAdd: () => void;
   onImport: () => void;
+  currency: string;
+  onPhotoImported: (count: number) => Promise<void>;
 }) {
   const [tab, setTab] = useState("All items");
   const groups = ["All items", ...new Set(catalog.map((c) => c.category))];
@@ -2104,6 +2132,23 @@ function MenuPage({
           ) : undefined
         }
       />
+      {canEdit && (
+        <>
+          <MenuPhotoUpload
+            currency={currency}
+            existingProducts={catalog.map((item) => ({
+              id: item.id,
+              name: item.name,
+            }))}
+            imports={menuImports}
+            onImported={onPhotoImported}
+          />
+          <MenuUploadHistory
+            imports={menuImports}
+            onChanged={onUploadsChanged}
+          />
+        </>
+      )}
       <div className="list-toolbar">
         <div className="tabs">
           {groups.map((g) => (
@@ -2433,7 +2478,10 @@ function OrderDetail({
   data: Workspace;
   onClose: () => void;
   onAction: (a: string) => void;
-  onCustomerLink: (method: "POST" | "DELETE") => Promise<Obj | undefined>;
+  onCustomerLink: (
+    method: "POST" | "DELETE",
+    purpose?: "order" | "recovery" | "receipt" | "billing",
+  ) => Promise<Obj | undefined>;
   onReceipt: (
     route: "receipt-link" | "receipt-send",
     method: "POST" | "DELETE",

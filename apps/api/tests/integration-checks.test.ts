@@ -123,3 +123,75 @@ test("Twilio messaging check supports a restricted API key without returning the
     globalThis.fetch = original;
   }
 });
+
+test("Firecrawl verifies the runtime key and returns only credit balance", async () => {
+  const original = globalThis.fetch;
+  let requested = "";
+  try {
+    globalThis.fetch = async (url, init) => {
+      requested = String(url);
+      assert.equal(
+        new Headers(init?.headers).get("Authorization"),
+        "Bearer private-firecrawl-key",
+      );
+      return Response.json({
+        success: true,
+        data: {
+          remainingCredits: 990,
+          planCredits: 1000,
+          apiKey: "never-return-key",
+        },
+      });
+    };
+    const result = await client(new MemoryRepository(), {
+      FIRECRAWL_API_KEY: "private-firecrawl-key",
+    })("integrations/firecrawl/test");
+    assert.equal(result.status, 200);
+    assert.equal(result.data.connected, true);
+    assert.equal(result.data.remaining_credits, 990);
+    assert.equal(requested, "https://api.firecrawl.dev/v2/team/credit-usage");
+    assert.equal(
+      JSON.stringify(result.data).includes("private-firecrawl-key"),
+      false,
+    );
+    assert.equal(
+      JSON.stringify(result.data).includes("never-return-key"),
+      false,
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+test("Firecrawl credential failure is not reported as connected", async () => {
+  const original = globalThis.fetch;
+  try {
+    globalThis.fetch = async () =>
+      Response.json({ error: "provider-secret-detail" }, { status: 401 });
+    const result = await client(new MemoryRepository(), {
+      FIRECRAWL_API_KEY: "invalid-key",
+    })("integrations/firecrawl/test");
+    assert.equal(result.status, 503);
+    assert.match(result.data.error, /Firecrawl/i);
+    assert.equal(
+      JSON.stringify(result.data).includes("provider-secret-detail"),
+      false,
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+test("Firecrawl zero credits means connected with no parsing balance", async () => {
+  const original = globalThis.fetch;
+  try {
+    globalThis.fetch = async () =>
+      Response.json({ success: true, data: { remainingCredits: 0 } });
+    const result = await client(new MemoryRepository(), {
+      FIRECRAWL_API_KEY: "key",
+    })("integrations/firecrawl/test");
+    assert.equal(result.status, 200);
+    assert.equal(result.data.connected, true);
+    assert.equal(result.data.remaining_credits, 0);
+  } finally {
+    globalThis.fetch = original;
+  }
+});

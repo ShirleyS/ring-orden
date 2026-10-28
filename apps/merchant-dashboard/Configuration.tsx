@@ -55,6 +55,7 @@ const vendorColors: Record<string, string> = {
   square: "#222",
   supabase: "#32a77a",
   mojoauth: "#8c52cc",
+  firecrawl: "#f06c2d",
   n8n: "#ea6d7c",
   webhook: "#927047",
 };
@@ -1546,17 +1547,19 @@ function ConfigDialog({
                       ? ["DEEPSEEK_API_KEY"]
                       : kind === "square"
                         ? ["SQUARE_ACCESS_TOKEN", "SQUARE_LOCATION_ID"]
-                        : kind === "mojoauth"
-                          ? [
-                              "MOJOAUTH_JWKS_URL",
-                              "MOJOAUTH_ISSUER",
-                              "MOJOAUTH_AUDIENCE",
-                            ]
-                          : kind === "supabase"
-                            ? ["SUPABASE_URL", "SUPABASE_SERVER_SECRET"]
-                            : kind === "n8n"
-                              ? ["AGENT_TOOL_SECRET", "N8N_WEBHOOK_URL"]
-                              : ["CUSTOM_WEBHOOK_URL"]
+                        : kind === "firecrawl"
+                          ? ["FIRECRAWL_API_KEY"]
+                          : kind === "mojoauth"
+                            ? [
+                                "MOJOAUTH_JWKS_URL",
+                                "MOJOAUTH_ISSUER",
+                                "MOJOAUTH_AUDIENCE",
+                              ]
+                            : kind === "supabase"
+                              ? ["SUPABASE_URL", "SUPABASE_SERVER_SECRET"]
+                              : kind === "n8n"
+                                ? ["AGENT_TOOL_SECRET", "N8N_WEBHOOK_URL"]
+                                : ["CUSTOM_WEBHOOK_URL"]
                 ).map((x) => (
                   <code key={x}>{x}</code>
                 ))}
@@ -1578,6 +1581,23 @@ function ConfigDialog({
                 )}
                 Test connection
               </button>
+              {kind === "elevenlabs" && (
+                <button
+                  className="secondary"
+                  type="button"
+                  disabled={testing}
+                  onClick={() =>
+                    test("/integrations/elevenlabs/configure-tools")
+                  }
+                >
+                  {testing ? (
+                    <Loader2 className="spin" size={16} />
+                  ) : (
+                    <Play size={16} />
+                  )}
+                  Connect ordering tools
+                </button>
+              )}
               {kind === "deepseek" && (
                 <p className="field-help">
                   You can also save a model connection from the AI model page.

@@ -8,6 +8,7 @@ export interface RuntimeEnv {
   SESSION_SECRET?: string;
   DEMO_MODE?: string;
   TRUST_SITES_HEADERS?: string;
+  FIRECRAWL_API_KEY?: string;
   DEEPSEEK_API_KEY?: string;
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
@@ -41,6 +42,25 @@ export interface Identity {
   name: string;
   provider: "sites" | "mojoauth" | "supabase" | "local-demo";
   email_verified?: boolean;
+}
+/** Normalize configuration copied from an Authorization header, never incoming requests. */
+export function configuredAgentSecret(env: RuntimeEnv): string | undefined {
+  let value = env.AGENT_TOOL_SECRET?.trim();
+  if (!value) return undefined;
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  )
+    value = value.slice(1, -1).trim();
+  value = value.replace(/^Bearer[ \t]+/i, "").trim();
+  if (
+    !value ||
+    /^Bearer(?:\s|$)/i.test(value) ||
+    /[\r\n]/.test(value) ||
+    /^["']|["']$/.test(value)
+  )
+    return undefined;
+  return value;
 }
 export class HttpError extends Error {
   status: number;
@@ -336,4 +356,80 @@ export function newInvitationToken(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(32)))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+}
+
+/** Keep the canonical workspace subject when a verified email moves providers. */
+export async function linkMojoIdentity(
+  identity: Identity,
+  env: RuntimeEnv,
+): Promise<Identity> {
+  if (identity.email_verified !== true || !identity.email.trim())
+    throw new HttpError(
+      401,
+      "A verified email address is required to sign in.",
+    );
+  if (!env.SUPABASE_URL) return identity;
+  if (!env.SUPABASE_SERVER_SECRET)
+    throw new HttpError(503, "Account linking is not configured.");
+  const origin = new URL(env.SUPABASE_URL);
+  if (origin.protocol !== "https:" || origin.username || origin.password)
+    throw new HttpError(503, "Account linking is not configured.");
+  for (let page = 1; page <= 10; page++) {
+    let response: Response;
+    try {
+      response = await fetch(
+        new URL(`/auth/v1/admin/users?page=${page}&per_page=1000`, origin),
+        {
+          headers: {
+            apikey: env.SUPABASE_SERVER_SECRET,
+            ...(env.SUPABASE_SERVER_SECRET.startsWith("sb_secret_")
+              ? {}
+              : { Authorization: `Bearer ${env.SUPABASE_SERVER_SECRET}` }),
+          },
+          redirect: "error",
+          signal: AbortSignal.timeout(7000),
+        },
+      );
+    } catch {
+      throw new HttpError(
+        503,
+        "Account lookup is unavailable. Please try again.",
+      );
+    }
+    if (!response.ok)
+      throw new HttpError(
+        503,
+        "Account lookup is unavailable. Please try again.",
+      );
+    const result = (await response.json()) as {
+      users?: {
+        id?: string;
+        email?: string;
+        email_confirmed_at?: string;
+        banned_until?: string;
+      }[];
+    };
+    if (!Array.isArray(result.users))
+      throw new HttpError(503, "Account lookup returned an invalid response.");
+    const matches = result.users.filter(
+      (user) =>
+        typeof user.email === "string" &&
+        user.email.trim().toLowerCase() === identity.email.trim().toLowerCase(),
+    );
+    if (matches.length > 1)
+      throw new HttpError(409, "Account linking requires support.");
+    const existing = matches[0];
+    if (
+      existing?.banned_until &&
+      Date.parse(existing.banned_until) > Date.now()
+    )
+      throw new HttpError(403, "This account is disabled.");
+    if (existing?.email_confirmed_at && typeof existing.id === "string")
+      return { ...identity, id: "supabase:" + existing.id };
+    if (result.users.length < 1000) return identity;
+  }
+  throw new HttpError(
+    503,
+    "Account lookup needs support before sign-in can continue.",
+  );
 }

@@ -64,10 +64,10 @@ export function seedTenant(
         maximum_quantity: 50,
       },
       agent: {
-        languages: ["es-MX", "en-US"],
+        languages: ["es-MX", "en-US", "zh-CN"],
         voice: "Warm & conversational",
         greeting:
-          "¡Hola! Welcome to Café Oliva. What can I get started for you?",
+          "¡Hola! Gracias por llamar a Café Oliva. ¿Qué te gustaría pedir?",
         pickup_minutes: 15,
         handoff_number: "",
         instructions:

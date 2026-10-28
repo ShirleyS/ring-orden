@@ -31,7 +31,12 @@ test("ElevenLabs webhook configs use valid value sources and only supported API 
     names.add(tool.name);
 
     const schema = tool.api_schema.request_body_schema;
-    for (const [property, definition] of Object.entries(schema.properties)) {
+    for (const [property, definition] of Object.entries(schema.properties as Record<string, {
+      description?: string;
+      dynamic_variable?: string;
+      constant_value?: unknown;
+      is_system_provided?: boolean;
+    }>)) {
       const sources = [
         Boolean(definition.description?.trim()),
         Boolean(definition.dynamic_variable),

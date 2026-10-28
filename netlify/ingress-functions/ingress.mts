@@ -7,7 +7,7 @@ export default function ingress(request: Request): Promise<Response> {
 }
 
 export const config: Config = {
-  path: ["/api/tools/*", "/api/webhooks/stripe", "/api/health"],
+  path: ["/api/tools/*", "/api/automation/*", "/api/customer/*", "/api/webhooks/stripe", "/api/webhooks/elevenlabs", "/api/health"],
   rateLimit: {
     windowLimit: 300,
     windowSize: 60,

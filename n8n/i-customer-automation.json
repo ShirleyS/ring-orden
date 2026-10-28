@@ -1,0 +1,190 @@
+{
+  "name": "Ring Orden — I — Durable Customer Follow-up",
+  "active": false,
+  "nodes": [
+    {
+      "id": "customer-automation-schedule",
+      "name": "Every minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0],
+      "parameters": {
+        "rule": { "interval": [{ "field": "minutes", "minutesInterval": 1 }] }
+      }
+    },
+    {
+      "id": "customer-automation-manual",
+      "name": "Manual test",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 180],
+      "parameters": {}
+    },
+    {
+      "id": "customer-automation-claim",
+      "name": "Claim backend jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.RING_ORDEN_API_ORIGIN + '/api/automation/claim_automation_jobs' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({worker_id:'n8n-customer-followup',limit:10}) }}",
+        "options": { "timeout": 15000 }
+      },
+      "credentials": {
+        "httpHeaderAuth": { "name": "Ring Orden service bearer token" }
+      }
+    },
+    {
+      "id": "customer-automation-split",
+      "name": "Split jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 0],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return ($input.first().json.jobs || []).map(job => ({json:job}));"
+      }
+    },
+    {
+      "id": "customer-automation-deadline",
+      "name": "Check dispatch deadline",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [620, 0],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const deadline = Date.parse($input.item.json.expires_at);\nif (!Number.isFinite(deadline) || deadline <= Date.now()) throw new Error('Customer job expired before provider dispatch; no message sent.');\nreturn $input.item;"
+      }
+    },
+    {
+      "id": "customer-automation-provider",
+      "name": "WhatsApp provider send",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [740, 0],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.WHATSAPP_SEND_URL }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ $json.idempotency_key }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({messaging_product:'whatsapp',to:$json.phone.replace(/^\\+/,''),type:'text',text:{preview_url:false,body:$json.message}}) }}",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": { "name": "WhatsApp provider bearer token" }
+      }
+    },
+    {
+      "id": "customer-automation-classify",
+      "name": "Classify provider evidence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [980, 0],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const job = $('Split jobs').item.json;\nconst response = $input.item.json;\nconst status = Number(response.statusCode || 0);\nconst message = response.body?.messages?.[0];\nconst messageId = message?.id;\nconst failed = ['failed','undelivered','rejected'].includes(String(message?.message_status || message?.status || response.body?.status || '').toLowerCase());\nlet outcome = 'unknown';\nif (failed || [400,401,403,404,422].includes(status)) outcome = 'permanent_failure';\nelse if (status >= 200 && status < 300 && !response.body?.error && typeof messageId === 'string' && messageId.length > 0) outcome = 'sent';\nelse if (status === 429) outcome = 'retryable_failure';\nreturn {json:{job_id:job.job_id,claim_token:job.claim_token,outcome,...(outcome === 'sent' ? {provider_message_id:messageId} : {})}};"
+      }
+    },
+    {
+      "id": "customer-automation-ack",
+      "name": "Acknowledge backend job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1220, 0],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.RING_ORDEN_API_ORIGIN + '/api/automation/ack_automation_job' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": { "timeout": 15000 }
+      },
+      "credentials": {
+        "httpHeaderAuth": { "name": "Ring Orden service bearer token" }
+      }
+    },
+    {
+      "id": "customer-automation-notes",
+      "name": "Read before activation",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [260, -320],
+      "parameters": {
+        "height": 270,
+        "width": 970,
+        "content": "## Inactive until synthetic end-to-end verification\nSet project variables RING_ORDEN_API_ORIGIN and WHATSAPP_SEND_URL, and named Header Auth credentials. Do not embed raw secrets. Provider URL expects Meta Cloud API-compatible messages schema; audit another provider before use.\nBackend is the only durable customer/job store. It persists claim before returning a message, enforces consent and expiry, and owns retry backoff. No customer SQL/database in n8n. No fiscal fields in messages.\nProvider send NEVER retries automatically. A timeout, unknown response, 5xx or missing provider message ID acknowledges UNKNOWN, requiring provider reconciliation; no blind duplicate sends. SENT means provider accepted, not delivered. Header Idempotency-Key is advisory unless your provider explicitly supports it.\nDo not save execution data containing customer phones or bearer links. Validate current WhatsApp session/template requirements before activation; never enable this schedule using live customers as a test."
+      }
+    }
+  ],
+  "connections": {
+    "Every minute": {
+      "main": [[{ "node": "Claim backend jobs", "type": "main", "index": 0 }]]
+    },
+    "Manual test": {
+      "main": [[{ "node": "Claim backend jobs", "type": "main", "index": 0 }]]
+    },
+    "Claim backend jobs": {
+      "main": [[{ "node": "Split jobs", "type": "main", "index": 0 }]]
+    },
+    "Split jobs": {
+      "main": [
+        [{ "node": "Check dispatch deadline", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check dispatch deadline": {
+      "main": [
+        [{ "node": "WhatsApp provider send", "type": "main", "index": 0 }]
+      ]
+    },
+    "WhatsApp provider send": {
+      "main": [
+        [{ "node": "Classify provider evidence", "type": "main", "index": 0 }]
+      ]
+    },
+    "Classify provider evidence": {
+      "main": [
+        [{ "node": "Acknowledge backend job", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": false
+  },
+  "tags": []
+}
