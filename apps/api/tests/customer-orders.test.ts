@@ -66,6 +66,64 @@ async function setup() {
   };
 }
 
+test("owner can issue purpose-specific Lovable links without sending a message", async () => {
+  const f = await setup();
+  const before = Date.now();
+  const recovery = await f.owner(`orders/${f.order.id}/customer-link`, "POST", {
+    purpose: "recovery",
+  });
+  assert.equal(recovery.status, 201, JSON.stringify(recovery.data));
+  assert.equal(new URL(recovery.data.url).pathname, "/order");
+  assert.ok(Date.parse(recovery.data.expires_at) >= before + 599_000);
+  assert.ok(Date.parse(recovery.data.expires_at) <= Date.now() + 600_000);
+  const billing = await f.owner(`orders/${f.order.id}/customer-link`, "POST", {
+    purpose: "billing",
+  });
+  assert.equal(billing.status, 201);
+  assert.equal(
+    new URL(billing.data.url).searchParams.get("purpose"),
+    "billing",
+  );
+  const token = new URL(billing.data.url).hash.slice(1);
+  const guest = () =>
+    call(f.repo, "customer/billing", "GET", undefined, {
+      Authorization: `Bearer ${token}`,
+      Origin: env.CUSTOMER_APP_ORIGIN,
+    });
+  assert.equal((await guest()).status, 200);
+  assert.equal(
+    (
+      await f.owner(`orders/${f.order.id}/customer-link`, "DELETE", {
+        purpose: "billing",
+      })
+    ).status,
+    200,
+  );
+  assert.equal((await guest()).status, 401);
+  assert.equal(
+    (
+      await f.owner(`orders/${f.order.id}/customer-link`, "POST", {
+        purpose: "receipt",
+      })
+    ).status,
+    409,
+  );
+  assert.equal(
+    (
+      await f.owner(`orders/${f.order.id}/customer-link`, "POST", {
+        purpose: "unknown",
+      })
+    ).status,
+    422,
+  );
+  const saved = await f.repo.loadByMerchant(f.merchantId);
+  assert.equal(
+    saved?.state.orders.find((o) => o.id === f.order.id)?.items.length,
+    f.order.items.length,
+  );
+  assert.equal((saved?.state as any).customer_automation.jobs.length, 0);
+});
+
 test("owner issues a fragment-only link and guest sees only this order's safe fields", async () => {
   const f = await setup();
   assert.equal(f.link.status, 201);

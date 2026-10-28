@@ -1578,6 +1578,23 @@ function ConfigDialog({
                 )}
                 Test connection
               </button>
+              {kind === "elevenlabs" && (
+                <button
+                  className="secondary"
+                  type="button"
+                  disabled={testing}
+                  onClick={() =>
+                    test("/integrations/elevenlabs/configure-tools")
+                  }
+                >
+                  {testing ? (
+                    <Loader2 className="spin" size={16} />
+                  ) : (
+                    <Play size={16} />
+                  )}
+                  Connect ordering tools
+                </button>
+              )}
               {kind === "deepseek" && (
                 <p className="field-help">
                   You can also save a model connection from the AI model page.

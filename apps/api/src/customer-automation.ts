@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { Order } from "../../../packages/ring-orden-core/src/index.ts";
 import type { RuntimeEnv } from "./auth.ts";
-import { HttpError } from "./auth.ts";
+import { HttpError, configuredAgentSecret } from "./auth.ts";
 import { issueCustomerOrderLink } from "./customer-orders.ts";
 import type { Session, TenantState } from "./types.ts";
 import { issueCustomerCapabilityLink } from "./customer-capabilities.ts";
@@ -112,7 +112,7 @@ const encode = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
 const decode = (text: string) =>
   Uint8Array.from(atob(text), (character) => character.charCodeAt(0));
 async function outboxKey(env: RuntimeEnv) {
-  const secret = env.AGENT_TOOL_SECRET;
+  const secret = configuredAgentSecret(env);
   if (typeof secret !== "string" || secret.length < 16)
     throw new HttpError(
       503,
@@ -418,6 +418,7 @@ export async function claimAutomationJobs(
       phone: job.phone,
       purpose: job.purpose,
       expires_at: job.expires_at,
+      url: link,
       message,
     });
   }

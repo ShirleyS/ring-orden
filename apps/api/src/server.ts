@@ -6,6 +6,7 @@ import {
   transitionOrder,
   priceOrder,
   CatalogItemSchema,
+  OperationSchema,
 } from "../../../packages/ring-orden-core/src/index.ts";
 import type {
   Order,
@@ -37,6 +38,7 @@ import {
   makeSessionCookie,
   sha256Hex,
   newInvitationToken,
+  configuredAgentSecret,
   HttpError,
 } from "./auth.ts";
 import type { RuntimeEnv, Identity } from "./auth.ts";
@@ -50,6 +52,7 @@ import {
 import { seedTenant } from "./seed.ts";
 import { SettingsSchemas, orderingIsOpen } from "./settings.ts";
 import { retryDuePOS } from "./pos-retry.ts";
+import { configureElevenLabsTools } from "./elevenlabs-setup.ts";
 import {
   handleCustomerTool,
   handleCustomerMerchant,
@@ -61,8 +64,13 @@ import {
 import {
   handleAutomationTool,
   queueCustomerVerification,
+  issueRecoveryLink,
 } from "./customer-automation.ts";
-import { handleCustomerCapability } from "./customer-capabilities.ts";
+import {
+  handleCustomerCapability,
+  issueCustomerCapabilityLink,
+  revokeCustomerCapabilityLink,
+} from "./customer-capabilities.ts";
 import {
   handleElevenLabsEvent,
   queueCompletedReceipts,
@@ -673,6 +681,7 @@ async function processTurn(
   utterance: string,
   env: RuntimeEnv,
   origin: string,
+  proposedOperations?: Operation[],
 ) {
   let order = findOrder(state, session.order_id);
   const wasConfirmed = [
@@ -718,7 +727,10 @@ async function processTurn(
     };
   };
   let model = "Demo interpreter";
-  if (isDemo(env) && !key)
+  if (proposedOperations) {
+    result = { operations: proposedOperations, reply: "" };
+    model = "Voice tool structured operations";
+  } else if (isDemo(env) && !key)
     result = interpretDemo(utterance, order, state.catalog, memory);
   else {
     if (
@@ -1236,9 +1248,9 @@ export async function handleRequest(
     let role: MerchantRole = "OWNER";
     if (path[0] === "tools") {
       if (
-        !env.AGENT_TOOL_SECRET ||
+        !configuredAgentSecret(env) ||
         request.headers.get("authorization") !==
-          `Bearer ${env.AGENT_TOOL_SECRET}` ||
+          `Bearer ${configuredAgentSecret(env)}` ||
         !env.AGENT_MERCHANT_ID
       )
         throw new HttpError(401, "Invalid agent tool authentication.");
@@ -1511,10 +1523,29 @@ export async function handleRequest(
           "Only the owner can manage customer order links.",
         );
       const order = findOrder(state, path[1]);
-      result =
-        method === "DELETE"
-          ? revokeCustomerOrderLink(state, order.id)
-          : await issueCustomerOrderLink(state, order, env);
+      const purpose = z
+        .enum(["order", "recovery", "receipt", "billing"])
+        .parse(body.purpose ?? "order");
+      if (method === "DELETE")
+        result =
+          purpose === "receipt" || purpose === "billing"
+            ? revokeCustomerCapabilityLink(state, order.id, purpose)
+            : revokeCustomerOrderLink(state, order.id);
+      else if (purpose === "receipt" || purpose === "billing") {
+        if (
+          purpose === "receipt" &&
+          (order.status !== "COMPLETED" || order.payment_status !== "PAID")
+        )
+          throw new HttpError(
+            409,
+            "A receipt link is available after the paid order is completed.",
+          );
+        result = await issueCustomerCapabilityLink(state, order, purpose, env);
+      } else
+        result =
+          purpose === "recovery"
+            ? await issueRecoveryLink(state, order, env)
+            : await issueCustomerOrderLink(state, order, env);
       status = method === "POST" ? 201 : 200;
       audit(
         state,
@@ -1956,6 +1987,20 @@ export async function handleRequest(
       );
     } else if (
       path[0] === "integrations" &&
+      path[1] === "elevenlabs" &&
+      path[2] === "configure-tools" &&
+      method === "POST"
+    ) {
+      const configured = await configureElevenLabsTools(env, merchantId);
+      result = configured;
+      audit(
+        state,
+        "voice.tools_configured",
+        "ElevenLabs tools attached and verified",
+        `${configured.tools_attached} tools`,
+      );
+    } else if (
+      path[0] === "integrations" &&
       path[2] === "test" &&
       method === "POST"
     ) {
@@ -2308,6 +2353,33 @@ export async function handleRequest(
           env,
         );
         status = 201;
+      } else if (tool === "apply_order_operations") {
+        let operations: unknown;
+        try {
+          operations = JSON.parse(
+            z.string().min(2).max(20000).parse(body.operations_json),
+          );
+        } catch {
+          throw new HttpError(422, "Supply a valid operations_json array.");
+        }
+        const parsed = z
+          .array(OperationSchema)
+          .min(1)
+          .max(20)
+          .parse(operations);
+        if (parsed.some((op) => op.action === "confirm_order"))
+          throw new HttpError(
+            422,
+            "Use confirm_order after reading back the complete order and obtaining explicit confirmation.",
+          );
+        result = await processTurn(
+          state,
+          session,
+          z.string().min(1).max(1500).parse(body.utterance),
+          env,
+          url.origin,
+          parsed,
+        );
       } else if (tool === "process_order_turn")
         result = await processTurn(
           state,
@@ -2320,7 +2392,9 @@ export async function handleRequest(
         if (body.confirmed !== true)
           throw new HttpError(422, "Explicit customer confirmation required.");
         const utterance = z.string().min(1).max(1500).parse(body.utterance);
-        result = await processTurn(state, session, utterance, env, url.origin);
+        result = await processTurn(state, session, utterance, env, url.origin, [
+          { action: "confirm_order", confirmed: true },
+        ]);
       } else if (["request_human", "escalate_issue"].includes(tool)) {
         let order = findOrder(state, session.order_id);
         order = applyOperation(

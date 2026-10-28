@@ -916,8 +916,10 @@ export default function MerchantApp() {
           data={data}
           onClose={() => setSelected(null)}
           busy={busy}
-          onCustomerLink={(method) =>
-            action("/orders/" + currentOrder.id + "/customer-link", method, {})
+          onCustomerLink={(method, purpose) =>
+            action("/orders/" + currentOrder.id + "/customer-link", method, {
+              purpose,
+            })
           }
           onAction={async (a) => {
             const r = await action(
@@ -2344,7 +2346,10 @@ function OrderDetail({
   data: Workspace;
   onClose: () => void;
   onAction: (a: string) => void;
-  onCustomerLink: (method: "POST" | "DELETE") => Promise<Obj | undefined>;
+  onCustomerLink: (
+    method: "POST" | "DELETE",
+    purpose?: "order" | "recovery" | "receipt" | "billing",
+  ) => Promise<Obj | undefined>;
   busy: boolean;
 }) {
   const [tab, setTab] = useState("Order");

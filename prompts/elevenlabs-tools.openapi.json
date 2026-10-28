@@ -1005,6 +1005,71 @@
           }
         }
       }
+    },
+    "/api/tools/apply_order_operations": {
+      "post": {
+        "operationId": "apply_order_operations",
+        "description": "Interpret the exact caller words and persist validated transaction operations.",
+        "security": [
+          {
+            "agentBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string"
+                  },
+                  "utterance": {
+                    "type": "string",
+                    "maxLength": 1500,
+                    "minLength": 1
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "description": "Unique ID for this customer turn; reuse only when retrying the same turn.",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  },
+                  "operations_json": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 20000,
+                    "description": "JSON array of canonical operations; confirm_order is prohibited here."
+                  }
+                },
+                "required": [
+                  "session_id",
+                  "utterance",
+                  "request_id",
+                  "operations_json"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative merchant-scoped tool result"
+          },
+          "401": {
+            "description": "Invalid server agent credential"
+          },
+          "404": {
+            "description": "Session not found for configured merchant"
+          },
+          "409": {
+            "description": "Operation cannot be applied to current order"
+          }
+        },
+        "summary": "Apply validated structured draft changes without a second LLM"
+      }
     }
   }
 }

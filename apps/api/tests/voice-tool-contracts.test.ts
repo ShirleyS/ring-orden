@@ -32,6 +32,23 @@ test("invoice tool can satisfy backend confirmation and reorders update the acti
     consent.api_schema.request_body_schema.required.includes("utterance"),
   );
   for (const config of configs) {
+    assert.deepEqual(config.api_schema.path_params_schema, {});
+    assert.equal(config.api_schema.query_params_schema, null);
+    for (const [name, property] of Object.entries(
+      config.api_schema.request_body_schema.properties,
+    ) as [string, any][]) {
+      assert.ok(
+        property.dynamic_variable || property.description,
+        `${config.name}.${name} must have a provider value source`,
+      );
+      assert.equal(Object.hasOwn(property, "minLength"), false);
+      if (name === "confirmed")
+        assert.equal(
+          Object.hasOwn(property, "constant_value"),
+          false,
+          "Consent must never be a forced constant",
+        );
+    }
     assert.equal(
       config.api_schema.url.startsWith("https://ring-api.example/api/tools/"),
       true,

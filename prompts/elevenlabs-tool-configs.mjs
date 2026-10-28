@@ -80,6 +80,28 @@ const definitions = [
     },
   },
   {
+    name: "apply_order_operations",
+    description:
+      "Apply structured changes you understood from the caller to the existing draft. Fetch get_menu first and use only its exact item/modifier IDs. RingOrden validates availability and calculates prices. Use confirm_order separately after a full readback and explicit consent. Never substitute unavailable items without asking.",
+    body: {
+      type: "object",
+      properties: {
+        session_id: sessionId,
+        utterance: utterance(
+          "The caller's exact words requesting these changes.",
+        ),
+        request_id: requestId,
+        operations_json: {
+          type: "string",
+          description:
+            'A JSON array of operations. Allowed shapes: {"action":"add_item","catalog_item_id":"ID","quantity":1,"modifier_ids":["ID"]}; {"action":"remove_item","target":{"line_id":"ORDER_LINE_ID"}}; {"action":"modify_item","target":{"line_id":"ORDER_LINE_ID"},"changes":{"quantity":1,"modifier_ids":["ID"]}}; {"action":"set_customer_name","name":"NAME"}; {"action":"set_fulfillment","fulfillment_type":"pickup"}; {"action":"set_pickup_time","scheduled_for":"ISO-8601"}; {"action":"add_note","note":"TEXT"}; {"action":"request_clarification","question":"TEXT"}. Never include prices, totals, or confirm_order. If IDs or intent are unclear, ask a question.',
+        },
+      },
+      required: ["session_id", "utterance", "request_id", "operations_json"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "process_order_turn",
     description:
       "Apply the caller's exact latest order words to the active saved order. Call for each new ordering utterance; ask the caller any clarification returned by the server, and never invent a price or availability.",
@@ -292,6 +314,38 @@ function safeOrigin(value) {
   return url.origin;
 }
 
+// ElevenLabs uses a restricted JSON-schema dialect, not arbitrary OpenAPI keywords.
+function providerSchema(schema, key = "body") {
+  const {
+    type,
+    description,
+    dynamic_variable,
+    properties,
+    required,
+    items,
+    enum: values,
+  } = schema;
+  const result = { type };
+  if (dynamic_variable) result.dynamic_variable = dynamic_variable;
+  else if (description) result.description = description;
+  else if (!properties && !items)
+    result.description =
+      key === "confirmed"
+        ? "True only when the caller explicitly confirmed this exact request; otherwise false. Never invent confirmation."
+        : `The ${key.replaceAll("_", " ")} explicitly provided or requested by the caller. Omit optional values that are unknown.`;
+  if (values) result.enum = values;
+  if (properties)
+    result.properties = Object.fromEntries(
+      Object.entries(properties).map(([key, value]) => [
+        key,
+        providerSchema(value, key),
+      ]),
+    );
+  if (required) result.required = required;
+  if (items) result.items = providerSchema(items);
+  return result;
+}
+
 export function buildElevenLabsToolConfigs({ apiOrigin, secretId }) {
   if (!secretId?.trim())
     throw new Error("An ElevenLabs workspace secret ID is required.");
@@ -303,9 +357,9 @@ export function buildElevenLabsToolConfigs({ apiOrigin, secretId }) {
     api_schema: {
       url: `${origin}/api/tools/${name}`,
       method: "POST",
-      path_params_schema: [],
-      query_params_schema: [],
-      request_body_schema: structuredClone(body),
+      path_params_schema: {},
+      query_params_schema: null,
+      request_body_schema: providerSchema(body),
       request_headers: {
         Authorization: { secret_id: secretId },
         "Content-Type": "application/json",
@@ -330,42 +384,59 @@ export function buildElevenLabsToolConfigs({ apiOrigin, secretId }) {
   }));
 }
 
-/** The dashboard JSON editor uses its form representation, distinct from REST API JSON. */
+/** The dashboard JSON editor uses its own complete form representation. */
 export function buildElevenLabsFormToolConfigs(options) {
   return buildElevenLabsToolConfigs(options).map((tool) => {
     const schema = tool.api_schema.request_body_schema;
     const properties = Object.entries(schema.properties).map(([id, value]) => ({
       id,
       type: Array.isArray(value.type) ? value.type[0] : value.type,
+      value_type: value.dynamic_variable ? "dynamic_variable" : "llm_prompt",
       description:
         value.description ||
-        `The ${id.replaceAll("_", " ")} for this exact tool request.`,
+        (id === "confirmed"
+          ? "True only after the caller explicitly confirms the current request; otherwise false."
+          : `The ${id.replaceAll("_", " ")} for this exact operation.`),
+      dynamic_variable: value.dynamic_variable || "",
+      constant_value: "",
+      enum: value.enum || null,
+      is_system_provided: false,
       required: schema.required.includes(id),
-      value_type: value.dynamic_variable
-        ? "dynamic_variable"
-        : "constant_value" in value
-          ? "constant"
-          : "llm_prompt",
-      ...(value.dynamic_variable
-        ? { dynamic_variable: value.dynamic_variable }
-        : {}),
-      ...("constant_value" in value
-        ? { constant_value: value.constant_value }
-        : {}),
-      ...(value.enum ? { enum: value.enum } : {}),
     }));
+    if (!properties.length)
+      properties.push({
+        id: "request_context",
+        type: "string",
+        value_type: "llm_prompt",
+        description: "Optional operation marker; it may be omitted.",
+        dynamic_variable: "",
+        constant_value: "",
+        enum: null,
+        is_system_provided: false,
+        required: false,
+      });
     return {
       ...tool,
+      disable_interruptions: false,
+      force_pre_tool_speech: false,
+      interruption_mode: "allow",
+      pre_tool_speech: "auto",
+      tool_call_sound: null,
+      tool_call_sound_behavior: "auto",
+      tool_error_handling_mode: "auto",
+      execution_mode: "immediate",
       follow_redirects: false,
+      follow_redirects_allowed_domains: [],
       api_schema: {
         ...tool.api_schema,
         request_body_schema: {
           id: "body",
           type: "object",
           description:
-            "Supply only the documented inputs for this authenticated operation.",
-          required: true,
+            "Supply only documented inputs for this authenticated operation.",
           properties,
+          required: schema.required.length > 0,
+          dynamic_variable: "",
           value_type: "llm_prompt",
         },
         request_headers: [
@@ -377,7 +448,11 @@ export function buildElevenLabsFormToolConfigs(options) {
         ],
         content_type: "application/json",
         auth_connection: null,
+        mtls_auth_connection: null,
+        response_filter: null,
       },
+      dynamic_variables: { dynamic_variable_placeholders: {} },
+      response_mocks: [],
     };
   });
 }

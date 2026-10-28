@@ -38,6 +38,25 @@ export interface Identity {
   provider: "sites" | "mojoauth" | "supabase" | "local-demo";
   email_verified?: boolean;
 }
+/** Normalize configuration copied from an Authorization header, never incoming requests. */
+export function configuredAgentSecret(env: RuntimeEnv): string | undefined {
+  let value = env.AGENT_TOOL_SECRET?.trim();
+  if (!value) return undefined;
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  )
+    value = value.slice(1, -1).trim();
+  value = value.replace(/^Bearer[ \t]+/i, "").trim();
+  if (
+    !value ||
+    /^Bearer(?:\s|$)/i.test(value) ||
+    /[\r\n]/.test(value) ||
+    /^["']|["']$/.test(value)
+  )
+    return undefined;
+  return value;
+}
 export class HttpError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -198,7 +217,10 @@ export async function identityFromRequest(
       throw new HttpError(503, "Supabase sign-in is not configured.");
     const token = bearer.slice(7).trim();
     if (!token || token.length > 8192)
-      throw new HttpError(401, "Your sign in expired or could not be verified.");
+      throw new HttpError(
+        401,
+        "Your sign in expired or could not be verified.",
+      );
     return verifySupabaseToken(token, env);
   }
   if (bearer?.startsWith("Bearer ") && env.MOJOAUTH_JWKS_URL)

@@ -48,6 +48,22 @@ function fixture() {
   return { state, order };
 }
 
+test("outbox encryption uses the same canonical credential across copied configuration formats", async () => {
+  const { state, order } = fixture();
+  await queueCustomerAutomation(
+    state,
+    { order_id: order.id, purpose: "recovery", consent: true },
+    { ...env, AGENT_TOOL_SECRET: `Bearer ${env.AGENT_TOOL_SECRET}` },
+  );
+  const result = await claimAutomationJobs(
+    state,
+    { worker_id: "normalization-check" },
+    env,
+  );
+  assert.equal(result.jobs.length, 1);
+  assert.match(result.jobs[0].message, /https:\/\/order\.example\/order#/);
+});
+
 test("recovery uses the exact saved draft and expires in exactly ten minutes; normal grants retain one hour", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: 1_800_000_000_000 });
   const { state, order } = fixture();
@@ -124,6 +140,9 @@ test("queue is durable and idempotent and claims cannot be duplicated", async ()
   );
   assert.equal(claimed.jobs.length, 1);
   assert.equal(claimed.jobs[0].idempotency_key, first.job_id);
+  assert.equal(new URL(claimed.jobs[0].url).origin, env.CUSTOMER_APP_ORIGIN);
+  assert.ok(claimed.jobs[0].message.includes(claimed.jobs[0].url));
+  assert.equal(JSON.stringify(restored).includes(claimed.jobs[0].url), false);
   assert.equal(
     (await claimAutomationJobs(restored, { worker_id: "n8n-two" }, env)).jobs
       .length,

@@ -73,6 +73,21 @@ function customerOrigin(env: RuntimeEnv) {
   }
 }
 
+export function revokeCustomerCapabilityLink(
+  state: State,
+  orderId: string,
+  purpose: CustomerCapabilityPurpose,
+) {
+  for (const grant of state.customer_automation?.grants ?? [])
+    if (
+      grant.order_id === orderId &&
+      grant.purpose === purpose &&
+      !grant.revoked_at
+    )
+      grant.revoked_at = new Date().toISOString();
+  return { revoked: true };
+}
+
 /** Mutates digest-only private grants. The caller must persist before exposing the URL. */
 export async function issueCustomerCapabilityLink(
   state: State,

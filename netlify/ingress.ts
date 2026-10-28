@@ -1,4 +1,5 @@
 import type { RuntimeEnv } from "../apps/api/src/auth.ts";
+import { configuredAgentSecret } from "../apps/api/src/auth.ts";
 import { handleRequest } from "../apps/api/src/server.ts";
 import type { Repository } from "../apps/api/src/types.ts";
 
@@ -8,6 +9,7 @@ const agentTools = new Set([
   "get_menu",
   "get_order_state",
   "process_order_turn",
+  "apply_order_operations",
   "confirm_order",
   "get_pickup_options",
   "request_human",
@@ -130,17 +132,14 @@ export async function handlePublicIngress(
 ): Promise<Response> {
   const route = ingressRoute(request);
   if (!route) return jsonError(404, "Endpoint not found.");
+  const serviceSecret = configuredAgentSecret(env);
   if (
     ["health", "agent", "automation"].includes(route) &&
     env.AGENT_TOOL_SECRET &&
-    (/^Bearer\s/i.test(env.AGENT_TOOL_SECRET) ||
-      env.AGENT_TOOL_SECRET.trim() !== env.AGENT_TOOL_SECRET ||
-      /^["']|["']$/.test(env.AGENT_TOOL_SECRET))
+    !serviceSecret
   )
-    return jsonError(
-      503,
-      "AGENT_TOOL_SECRET must contain only the secret, with no Bearer prefix, quotes or surrounding whitespace.",
-    );
+    return jsonError(503, "AGENT_TOOL_SECRET configuration is invalid.");
+  env = { ...env, AGENT_TOOL_SECRET: serviceSecret };
 
   if (
     !env.SUPABASE_URL ||
