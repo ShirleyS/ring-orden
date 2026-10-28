@@ -30,6 +30,8 @@ Deployment: API source deployed to the existing ring-orden-api-shirleys project.
 
 Private merchant preview was created at https://6ae23b3160433bdc17fdf5cf--ring-orden-shirleys.netlify.app . It loaded the shell but displayed a workspace bootstrap error; it was not promoted to production. Packaging/runtime and preview environment need investigation. The n8n draft was imported at https://shirleys.app.n8n.cloud/workflow/dOwxBkk7vSwicPpM and contains the intended nine nodes, with the provider endpoint visibly unconfigured. It remains inactive.
 
+Follow-up diagnostic: the first preview omitted `@netlify/database` from its function package. `scripts/build-merchant-preview.mjs` now bundles dependencies explicitly; its standalone handler imports successfully. The corrected preview https://6ae23bfcb02a7950d82f1291--ring-orden-shirleys.netlify.app starts its function and returns a database-configuration error, showing that this preview lacks the required production database environment. Production was left unchanged; do not call either preview a verified hosted customer-management deployment.
+
 ## Tests and evidence
 
 400 tests passed in the full suite after integration; typecheck passed. Dashboard production build passed. SQL tests execute actual migrations/RPCs using PGlite. Browser tests used real local API handlers with synthetic data for profile/preferences, manager/staff boundaries, receipts, optional-email billing, verification, invalid/replaced fragments and responsive styling. These are not live-provider certification.
