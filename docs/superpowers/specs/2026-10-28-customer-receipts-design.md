@@ -1,7 +1,7 @@
 # Lovable customer receipts and billing details
 
 Date: 2026-10-28
-Status: proposed extension; awaiting user review. No implementation or deployment claimed.
+Status: user approved the flow and explicitly requested continued implementation. Deployment remains separate from implementation.
 
 ## Intent and decisions from the user
 

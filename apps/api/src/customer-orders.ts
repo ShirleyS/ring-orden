@@ -12,6 +12,7 @@ import type {
 import { HttpError, sha256Hex } from "./auth.ts";
 import type { RuntimeEnv } from "./auth.ts";
 import type { Repository, TenantState } from "./types.ts";
+import { billingSummary, saveBillingDetails } from "./customer-receipts.ts";
 
 const draftStatuses = new Set([
   "DRAFT",
@@ -55,6 +56,7 @@ const envelopeSchema = z
     merchant_id: routingId,
     order_id: routingId,
     secret: z.string().regex(/^[a-f0-9]{64}$/),
+    scope: z.literal("receipt").optional(),
   })
   .strict();
 const revisionSchema = z.number().int().nonnegative();
@@ -99,7 +101,7 @@ export interface CustomerOrderServices {
 }
 
 /** One explicitly configured origin; never trust an origin supplied by the caller. */
-function customerOrigin(env: RuntimeEnv): string {
+export function customerOrigin(env: RuntimeEnv): string {
   try {
     const url = new URL(String(env.CUSTOMER_APP_ORIGIN ?? ""));
     const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
@@ -168,9 +170,12 @@ export async function issueCustomerOrderLink(
   state: TenantState,
   order: Order,
   env: RuntimeEnv,
+  scope: "order" | "receipt" = "order",
 ) {
   const origin = customerOrigin(env);
-  if (
+  if (scope === "receipt" && draftStatuses.has(order.status))
+    throw new HttpError(409, "Confirm this order before creating a receipt.");
+  if (scope === "order" &&
     order.merchant_id !== state.merchant.id ||
     !state.orders.some((o) => o.id === order.id)
   )
@@ -189,22 +194,30 @@ export async function issueCustomerOrderLink(
       merchant_id: state.merchant.id,
       order_id: order.id,
       secret,
+      ...(scope === "receipt" ? {scope} : {}),
     }),
   )
     .replace(/=/g, "")
     .replace(/\+/g, "-")
     .replace(/\//g, "_");
-  const expires_at = new Date(Date.now() + 60 * 60_000).toISOString();
+  const expires_at = new Date(Date.now() + (scope === "receipt" ? 7 * 86400_000 : 60 * 60_000)).toISOString();
   state.order_metadata[order.id] ??= {
     pos_status: "DASHBOARD_ONLY",
     notification_status: "PENDING",
     demo: env.DEMO_MODE !== "false",
   };
-  state.order_metadata[order.id].customer_link = {
+  state.order_metadata[order.id][scope === "receipt" ? "receipt_link" : "customer_link"] = {
     hash: await sha256Hex(token),
     expires_at,
   };
-  return { url: `${origin}/order#${token}`, expires_at };
+  return { url: `${origin}/${scope === "receipt" ? "receipt" : "order"}#${token}`, expires_at };
+}
+
+export const issueCustomerReceiptLink = (state: TenantState, order: Order, env: RuntimeEnv) =>
+  issueCustomerOrderLink(state, order, env, "receipt");
+export function revokeCustomerReceiptLink(state: TenantState, orderId: string) {
+  delete state.order_metadata[orderId]?.receipt_link;
+  return {revoked:true};
 }
 
 export function revokeCustomerOrderLink(state: TenantState, orderId: string) {
@@ -234,7 +247,8 @@ async function authenticate(request: Request, repo: Repository) {
   const order = stored?.state.orders.find(
     (o) => o.id === envelope.order_id && o.merchant_id === envelope.merchant_id,
   );
-  const grant = stored?.state.order_metadata[envelope.order_id]?.customer_link;
+  const scope = envelope.scope ?? "order";
+  const grant = stored?.state.order_metadata[envelope.order_id]?.[scope === "receipt" ? "receipt_link" : "customer_link"];
   const digest = await sha256Hex(token);
   let difference = 0;
   const expected = grant?.hash ?? "0".repeat(64);
@@ -249,7 +263,7 @@ async function authenticate(request: Request, repo: Repository) {
     Date.parse(grant.expires_at) <= Date.now()
   )
     throw invalid();
-  return { stored, order, expires_at: grant.expires_at };
+  return { stored, order, expires_at: grant.expires_at, scope };
 }
 
 function customerView(
@@ -380,6 +394,8 @@ export async function handleCustomerOrderRequest(
       ["/api/customer/order", ["GET", "PATCH", "OPTIONS"]],
       ["/api/customer/confirm", ["POST", "OPTIONS"]],
       ["/api/customer/checkout", ["POST", "OPTIONS"]],
+      ["/api/customer/receipt", ["GET", "OPTIONS"]],
+      ["/api/customer/billing", ["PUT", "OPTIONS"]],
     ]);
     const methods = allowed.get(route);
     if (!methods) throw new HttpError(404, "Endpoint not found.");
@@ -404,12 +420,26 @@ export async function handleCustomerOrderRequest(
       stored,
       order: originalOrder,
       expires_at,
+      scope,
     } = await authenticate(request, repo);
+    if (scope === "receipt" && !["/api/customer/receipt", "/api/customer/billing", "/api/customer/checkout"].includes(route))
+      throw new HttpError(403,"This receipt link cannot change or confirm an order.");
+    if (scope !== "receipt" && ["/api/customer/receipt", "/api/customer/billing"].includes(route))
+      throw new HttpError(403,"Use the receipt link to access billing.");
     const state = stored.state;
     let order = originalOrder;
-    if (request.method === "GET")
-      return json(customerView(state, order, expires_at, services));
+    if (request.method === "GET") {
+      const view=customerView(state,order,expires_at,services);
+      return json(scope === "receipt" ? {...view,editable:false,catalog:[],billing:billingSummary(state,order.id)} : view);
+    }
     const body = await readBody(request);
+    if (route.endsWith("/billing")) {
+      if (draftStatuses.has(order.status)) throw new HttpError(409,"Confirm the order before submitting billing details.");
+      const result=saveBillingDetails(state,order.id,body);
+      if (!(await repo.saveTrusted(state.merchant.id,stored.revision,state)))
+        throw new HttpError(409,"Billing details changed. Refresh and try again.");
+      return json(result);
+    }
     if (route.endsWith("/checkout")) {
       z.object({}).strict().parse(body);
       if (!canPay(order))

@@ -54,6 +54,8 @@ import {
   handleCustomerOrderRequest,
   issueCustomerOrderLink,
   revokeCustomerOrderLink,
+  issueCustomerReceiptLink,
+  revokeCustomerReceiptLink,
 } from "./customer-orders.ts";
 import {
   createCheckout,
@@ -114,9 +116,10 @@ function summary(order: Order) {
 }
 
 function metadata(state: TenantState, order: Order) {
+  const {billing: _billing, ...safeMetadata} = state.order_metadata[order.id] ?? {};
   return {
     ...order,
-    ...state.order_metadata[order.id],
+    ...safeMetadata,
     customer_name: order.customer.name,
   };
 }
@@ -1273,6 +1276,10 @@ export async function handleRequest(
           ].includes(order.status);
         if (path[1]) {
           const order = findOrder(state, path[1]);
+          if (path[2] === "billing" && path.length === 3) {
+            if (role !== "OWNER") throw new HttpError(403,"Only the owner can view billing details.");
+            return json(state.order_metadata[order.id]?.billing ?? {revision:0,details:null});
+          }
           if (role === "STAFF" && !active(order))
             throw new HttpError(403, "Staff can only access active orders.");
           return json(redactOrderForRole(metadata(state, order), role));
@@ -1334,7 +1341,7 @@ export async function handleRequest(
     // A capability URL is returned only once; never retain it in the response cache.
     const issuesCustomerLink =
       method === "POST" &&
-      ((path[0] === "orders" && path[2] === "customer-link") ||
+      ((path[0] === "orders" && ["customer-link", "receipt-link"].includes(path[2])) ||
         (path[0] === "tools" && path[1] === "customer_link"));
     const requestKey =
       requestId && !issuesCustomerLink
@@ -1364,7 +1371,7 @@ export async function handleRequest(
     if (
       path[0] === "orders" &&
       path.length === 3 &&
-      path[2] === "customer-link" &&
+      ["customer-link", "receipt-link"].includes(path[2]) &&
       ["POST", "DELETE"].includes(method)
     ) {
       if (role !== "OWNER")
@@ -1375,8 +1382,8 @@ export async function handleRequest(
       const order = findOrder(state, path[1]);
       result =
         method === "DELETE"
-          ? revokeCustomerOrderLink(state, order.id)
-          : await issueCustomerOrderLink(state, order, env);
+          ? (path[2] === "receipt-link" ? revokeCustomerReceiptLink(state,order.id) : revokeCustomerOrderLink(state, order.id))
+          : await (path[2] === "receipt-link" ? issueCustomerReceiptLink(state,order,env) : issueCustomerOrderLink(state, order, env));
       status = method === "POST" ? 201 : 200;
       audit(
         state,
