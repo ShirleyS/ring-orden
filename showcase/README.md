@@ -29,6 +29,12 @@ Provider and workflow behavior was reviewed against the local V2.1 customer-auto
 
 ## Verification
 
-The release was checked in the browser and with 64 DOM checks covering every clickable node across four workflow views, both languages, synchronized controls, login destinations, section anchors, unique IDs and portable links. This static addition does not modify the merchant application or deploy a new public homepage automatically.
+The release was checked in the browser and with 72 DOM checks covering every clickable node across four workflow views, both languages, synchronized controls, login destinations, section anchors, unique IDs and portable links. This static addition does not modify the merchant application or deploy a new public homepage automatically.
 
 The source is covered by the repository's MIT license.
+
+## Call intent before ordering
+
+The customer view starts with three branches: information, complaints/help, and ordering. ElevenLabs can answer hours, address and menu questions using `get_business_info`/`get_menu` without creating a session or cart. It must use configured business data and ask staff when information is missing.
+
+The requested complaint policy is immediate acknowledgement and escalation to a designated direct contact, without selling or pushing an order. This policy is shown as proposed until the agent and contact route are configured. The current `request_human`/`escalate_issue` backend returns a high-priority callback ticket with `transfer_available:false`, and requires a saved session. It does not implement a session-free complaint intake, live transfer, or a direct-contact notification. Those gaps must be closed and tested before advertising immediate contact delivery.
