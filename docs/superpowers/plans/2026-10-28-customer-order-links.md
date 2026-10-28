@@ -25,7 +25,7 @@
 - Repeated confirmation must not send duplicate orders or duplicate checkout creation.
 
 ### Task 1: Secure guest capability and order API
-**Files:** Create apps/api/src/customer-orders.ts; create apps/api/tests/customer-orders.test.ts; modify apps/api/src/types.ts, apps/api/src/server.ts, apps/api/src/rbac.ts, apps/api/src/auth.ts.
+**Files:** Create apps/api/src/customer-orders.ts; create apps/api/tests/customer-orders.test.ts; modify apps/api/src/types.ts, apps/api/src/server.ts, apps/api/src/rbac.ts, apps/api/src/auth.ts. Add apps/merchant-dashboard/CustomerOrderLink.tsx and its owner-only order-detail integration.
 **Interfaces:** issueCustomerOrderLink(state, order, env) returns {url, expires_at}; handleCustomerOrderRequest(request, env, repo, services) returns Response; customer service callbacks reuse pricing/confirmation/delivery from server.ts.
 - [x] Write failing route tests: owner issuance, token-only guest access, exact field allowlist, tampering, expiry/replacement/revocation, roles, CORS, schema rejection, stale revision, repricing and closed restaurant, idempotent confirmation and paid-order immutability.
 - [x] Run node --experimental-strip-types --test apps/api/tests/customer-orders.test.ts. Expected: route assertions fail because endpoints are absent.
@@ -39,5 +39,5 @@
 - [x] Document exact payloads, response fields, production boundaries and public-ingress integration, including customer_link voice-tool registration.
 - [x] Check user Lovable connection; create customer page using the reviewed brief when access exists. If signed out, retain the precise access blocker and finish independent backend work.
 - [ ] Verify guest screens and real test checkout in browser; do not infer from unit tests that Lovable or production is deployed.
-- [ ] Run full suite, typecheck and production build once final source changes settle. Expected: zero test failures, zero type errors and successful build.
-- [ ] Review the complete branch and report separately what is built, verified and still awaiting external access.
+- [x] Run full suite, typecheck and production build once final source changes settle. Expected: zero test failures, zero type errors and successful build.
+- [x] Review the complete branch and report separately what is built, verified and still awaiting external access.

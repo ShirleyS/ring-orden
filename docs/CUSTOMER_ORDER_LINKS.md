@@ -13,7 +13,7 @@ Issue a link as an authenticated merchant OWNER:
 
 Returns HTTP 201 `{ "url": "https://customer.example/order#<token>", "expires_at": "..." }`.
 
-The token is returned once and is not persisted in the idempotency-response cache. Reissuing replaces the previous token immediately. `DELETE /api/orders/{order_id}/customer-link` revokes it. Issuance/revocation currently use the merchant API; merchant dashboard buttons are not included in this feature.
+The token is returned once and is not persisted in the idempotency-response cache. Reissuing replaces the previous token immediately. `DELETE /api/orders/{order_id}/customer-link` revokes it. The existing merchant order detail now includes owner-only Create/Replace, Copy and Revoke controls. The complete credential stays only in that open dialog; generating or copying a link never sends a customer message.
 
 The authenticated voice agent can call `POST /api/tools/customer_link`, JSON `{ "session_id": "<existing session>" }`, with the existing merchant-bound agent-tool bearer secret. It gets the same link result. This endpoint does not send a WhatsApp/SMS message. Connect a consent-aware notification step separately. Do not read a long link aloud or promise a message was sent before its provider acknowledges it.
 
@@ -41,3 +41,11 @@ The original checkout has concurrent voice/auth/public-ingress work. This branch
 
 ## Known deployment boundary
 Unit tests exercise the real handler with the in-memory Repository test double. They do not prove a deployed Lovable page can reach production storage. Backend changes remain isolated until integration with the ongoing voice fixes and the public API is verified.
+
+## Verification on 2026-10-28
+- Backend: all 346 tests pass, including 19 new customer-link/POS regression checks; typecheck and Netlify production build pass. Existing bundle-size/deprecation warnings remain.
+- Independent security/correctness review reproduced two issues (revoked grants restored by stale provider metadata, and multi-unavailable-line repair). Both have failing-then-passing regression tests and were re-reviewed.
+- Lovable: verified ES/EN controls, name entry, quantity update, explicit review then confirmation, simulated checkout/pending/paid, and missing-token rejection. The generated API client matches the implemented route/payload names and omits cookies. At 375px, document width is 375px with no horizontal overflow. Screenshots are saved under ignored outputs/.
+- Minor demo interaction: a first tap while name autosave is pending may be ignored; controls display Saving while writes run. No real payment or customer message was sent.
+- Source was rebased onto published GitHub main bc40e11, retaining newer Supabase sign-in and voice changes. A contextual TypeScript annotation on the existing voice SDK options fixes type widening from that main commit without changing runtime behavior.
+- Not yet verified: actual Lovable origin to a public deployed customer API, durable deployed storage, real voice handoff delivery, or Stripe test checkout/webhook end-to-end. Current production is unchanged.

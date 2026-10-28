@@ -63,6 +63,7 @@ import { Obj, Workspace, money, label, time, api } from "./types";
 import { Configuration, Onboarding } from "./Configuration";
 import MenuImport from "./MenuImport";
 import VoiceCall from "./VoiceCall";
+import CustomerOrderLink from "./CustomerOrderLink";
 import { confirmedOrders, inPeriod } from "./reporting";
 import {
   consumeSupabaseMagicLink,
@@ -910,6 +911,9 @@ export default function MerchantApp() {
           data={data}
           onClose={() => setSelected(null)}
           busy={busy}
+          onCustomerLink={(method) =>
+            action("/orders/" + currentOrder.id + "/customer-link", method, {})
+          }
           onAction={async (a) => {
             const r = await action(
               "/orders/" + currentOrder.id + "/action",
@@ -2328,12 +2332,14 @@ function OrderDetail({
   data,
   onClose,
   onAction,
+  onCustomerLink,
   busy,
 }: {
   order: Obj;
   data: Workspace;
   onClose: () => void;
   onAction: (a: string) => void;
+  onCustomerLink: (method: "POST" | "DELETE") => Promise<Obj | undefined>;
   busy: boolean;
 }) {
   const [tab, setTab] = useState("Order");
@@ -2443,6 +2449,20 @@ function OrderDetail({
                 {label(o.pos_status || o.pos_sync_status || "Dashboard only")}
               </span>
             </div>
+            {data.user.role === "OWNER" &&
+              ![
+                "CANCELLED",
+                "REFUND_PENDING",
+                "REFUNDED",
+                "ESCALATED",
+              ].includes(o.status) && (
+                <CustomerOrderLink
+                  key={o.id}
+                  busy={busy}
+                  expiresAt={o.customer_link?.expires_at}
+                  onRequest={onCustomerLink}
+                />
+              )}
           </>
         ) : tab === "Conversation" ? (
           <div className="transcript">
