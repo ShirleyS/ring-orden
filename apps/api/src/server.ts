@@ -1886,24 +1886,33 @@ export async function handleRequest(
           403,
           "This voice agent is not bound to your merchant workspace. Configure a merchant-specific agent first.",
         );
-      if (!env.ELEVENLABS_API_KEY || !env.ELEVENLABS_AGENT_ID)
+      if (!env.ELEVENLABS_AGENT_ID)
         throw new HttpError(
           503,
           "Connect ElevenLabs to start a real voice call.",
         );
-      const response = await fetch(
-        `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(env.ELEVENLABS_AGENT_ID)}`,
-        {
-          headers: { "xi-api-key": env.ELEVENLABS_API_KEY },
-          signal: AbortSignal.timeout(8000),
-        },
-      );
-      if (!response.ok)
-        throw new HttpError(
-          502,
-          `ElevenLabs rejected the voice session request (HTTP ${response.status}). Check the agent ID and API-key permissions.`,
+      if (env.ELEVENLABS_AGENT_PUBLIC === "true") {
+        result = { agent_id: env.ELEVENLABS_AGENT_ID };
+      } else {
+        if (!env.ELEVENLABS_API_KEY)
+          throw new HttpError(
+            503,
+            "Connect ElevenLabs to start a real voice call.",
+          );
+        const response = await fetch(
+          `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(env.ELEVENLABS_AGENT_ID)}`,
+          {
+            headers: { "xi-api-key": env.ELEVENLABS_API_KEY },
+            signal: AbortSignal.timeout(8000),
+          },
         );
-      result = await response.json();
+        if (!response.ok)
+          throw new HttpError(
+            502,
+            `ElevenLabs rejected the voice session request (HTTP ${response.status}). Check the agent ID and API-key permissions.`,
+          );
+        result = await response.json();
+      }
     } else if (
       path[0] === "escalations" &&
       path[2] === "resolve" &&

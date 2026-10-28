@@ -15,6 +15,7 @@ export interface RuntimeEnv {
   TWILIO_WHATSAPP_TEMPLATE_SID?: string;
   ELEVENLABS_API_KEY?: string;
   ELEVENLABS_AGENT_ID?: string;
+  ELEVENLABS_AGENT_PUBLIC?: string;
   AGENT_TOOL_SECRET?: string;
   AGENT_MERCHANT_ID?: string;
   SQUARE_ACCESS_TOKEN?: string;

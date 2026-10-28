@@ -138,27 +138,32 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
       // Fetch configuration first: an unconfigured workspace never prompts for a microphone.
       const payload = await api<{
         signed_url?: string;
+        agent_id?: string;
         error?: string | { message?: string };
         message?: string;
       }>("/voice/signed-url", "POST", {}, controller.signal);
       clearTimeout(signedTimer);
       signedTimer = undefined;
       if (!current()) return;
-      if (!payload.signed_url)
+      if (!payload.signed_url && !payload.agent_id)
         throw new Error(
-          "The voice provider did not return a signed conversation URL.",
+          "The voice provider did not return a conversation connection.",
         );
-      const signed = new URL(payload.signed_url);
-      if (
-        signed.protocol !== "wss:" ||
-        !(
-          signed.hostname === "elevenlabs.io" ||
-          signed.hostname.endsWith(".elevenlabs.io")
+      if (payload.signed_url) {
+        const signed = new URL(payload.signed_url);
+        if (
+          signed.protocol !== "wss:" ||
+          !(
+            signed.hostname === "elevenlabs.io" ||
+            signed.hostname.endsWith(".elevenlabs.io")
+          )
         )
-      )
-        throw new Error(
-          "The voice provider returned an invalid conversation URL.",
-        );
+          throw new Error(
+            "The voice provider returned an invalid conversation URL.",
+          );
+      } else if (!/^(agent_|seng_)[a-zA-Z0-9_-]+$/.test(payload.agent_id!)) {
+        throw new Error("The voice provider returned an invalid agent ID.");
+      }
       // This method runs only in response to the user's explicit Start call action.
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (!current()) {
@@ -168,8 +173,7 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
       permissionStream.current = stream;
       const { Conversation } = await import("@elevenlabs/client");
       if (!current()) return;
-      const pending = Conversation.startSession({
-        signedUrl: payload.signed_url,
+      const sessionOptions = {
         connectionType: "websocket",
         textOnly: false,
         onConversationCreated: (connected) => {
@@ -240,7 +244,16 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
             refresh();
           }
         },
-      });
+      };
+      const pending = payload.signed_url
+        ? Conversation.startSession({
+            signedUrl: payload.signed_url,
+            ...sessionOptions,
+          })
+        : Conversation.startSession({
+            agentId: payload.agent_id!,
+            ...sessionOptions,
+          });
       // If the dialog closes while the SDK connects, close its late-arriving session too.
       void pending
         .then((connected) => {
