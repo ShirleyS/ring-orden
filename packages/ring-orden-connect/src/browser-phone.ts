@@ -93,3 +93,31 @@ export async function withDeadline<T>(
     clearTimeout(timer);
   }
 }
+
+/** Stop the live audio owner before returning control to the embedded caller. */
+export function handleBrowserPhonePopupClosed(
+  popup: { closed: boolean } | null,
+  onStop: () => void,
+  restoreEmbeddedPeer: () => void,
+): boolean {
+  if (!popup?.closed) return false;
+  onStop();
+  restoreEmbeddedPeer();
+  return true;
+}
+
+/** A rejected SDK mute must undo any optimistic caller UI state. */
+export function handleBrowserPhoneMuteRequest(
+  muted: boolean,
+  onMute: (muted: boolean) => boolean,
+  sendCurrentState: () => void,
+): boolean {
+  let accepted = false;
+  try {
+    accepted = onMute(muted);
+  } catch {
+    /* Restore the actual parent state below. */
+  }
+  if (!accepted) sendCurrentState();
+  return accepted;
+}

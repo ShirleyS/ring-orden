@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   browserPhoneUrl,
+  handleBrowserPhonePopupClosed,
+  handleBrowserPhoneMuteRequest,
   readBrowserPhoneEvent,
   withDeadline,
 } from "../src/browser-phone.ts";
@@ -58,4 +60,63 @@ test("deadline returns success or rejects a pending stage", async () => {
     withDeadline(new Promise(() => {}), 5, "Microphone timed out"),
     /Microphone timed out/,
   );
+});
+
+test("closing the caller popup stops the live call before restoring its embedded peer", () => {
+  const actions: string[] = [];
+  const onStop = () => {
+    actions.push("stop SDK session");
+  };
+  const restore = () => {
+    actions.push("restore embedded peer");
+  };
+  assert.equal(handleBrowserPhonePopupClosed(null, onStop, restore), false);
+  assert.equal(
+    handleBrowserPhonePopupClosed({ closed: false }, onStop, restore),
+    false,
+  );
+  assert.deepEqual(actions, []);
+  assert.equal(
+    handleBrowserPhonePopupClosed({ closed: true }, onStop, restore),
+    true,
+  );
+  assert.deepEqual(actions, ["stop SDK session", "restore embedded peer"]);
+});
+
+test("failed mute requests resend authoritative state even when it has not changed", () => {
+  const states: boolean[] = [];
+  const parentMuted = false;
+  const sendState = () => {
+    states.push(parentMuted);
+  };
+  assert.equal(
+    handleBrowserPhoneMuteRequest(true, () => false, sendState),
+    false,
+  );
+  assert.deepEqual(states, [false]);
+  assert.equal(
+    handleBrowserPhoneMuteRequest(
+      true,
+      () => {
+        throw new Error("SDK unavailable");
+      },
+      sendState,
+    ),
+    false,
+  );
+  assert.deepEqual(states, [false, false]);
+  let requested: boolean | undefined;
+  assert.equal(
+    handleBrowserPhoneMuteRequest(
+      true,
+      (next) => {
+        requested = next;
+        return true;
+      },
+      sendState,
+    ),
+    true,
+  );
+  assert.equal(requested, true);
+  assert.deepEqual(states, [false, false]);
 });
