@@ -64,6 +64,7 @@ import { Configuration, Onboarding } from "./Configuration";
 import MenuImport from "./MenuImport";
 import VoiceCall from "./VoiceCall";
 import CustomerOrderLink from "./CustomerOrderLink";
+import CustomerReceipt from "./CustomerReceipt";
 import { confirmedOrders, inPeriod } from "./reporting";
 import {
   consumeSupabaseMagicLink,
@@ -913,6 +914,9 @@ export default function MerchantApp() {
           busy={busy}
           onCustomerLink={(method) =>
             action("/orders/" + currentOrder.id + "/customer-link", method, {})
+          }
+          onReceipt={(route, method, body) =>
+            action(`/orders/${currentOrder.id}/${route}`, method, body)
           }
           onAction={async (a) => {
             const r = await action(
@@ -2333,6 +2337,7 @@ function OrderDetail({
   onClose,
   onAction,
   onCustomerLink,
+  onReceipt,
   busy,
 }: {
   order: Obj;
@@ -2340,6 +2345,11 @@ function OrderDetail({
   onClose: () => void;
   onAction: (a: string) => void;
   onCustomerLink: (method: "POST" | "DELETE") => Promise<Obj | undefined>;
+  onReceipt: (
+    route: "receipt-link" | "receipt-send",
+    method: "POST" | "DELETE",
+    body?: unknown,
+  ) => Promise<Obj | null | undefined>;
   busy: boolean;
 }) {
   const [tab, setTab] = useState("Order");
@@ -2461,6 +2471,22 @@ function OrderDetail({
                   busy={busy}
                   expiresAt={o.customer_link?.expires_at}
                   onRequest={onCustomerLink}
+                />
+              )}
+            {data.user.role === "OWNER" &&
+              ![
+                "DRAFT",
+                "AWAITING_CLARIFICATION",
+                "AWAITING_CONFIRMATION",
+                "ESCALATED",
+              ].includes(o.status) && (
+                <CustomerReceipt
+                  key={`receipt-${o.id}`}
+                  orderId={o.id}
+                  busy={busy}
+                  expiresAt={o.receipt_link?.expires_at}
+                  status={o.receipt_notification?.status}
+                  onRequest={onReceipt}
                 />
               )}
           </>

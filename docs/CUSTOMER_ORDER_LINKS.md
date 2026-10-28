@@ -4,6 +4,29 @@ Feature branch: `codex/customer-order-links`. Lovable project: https://lovable.d
 
 This feature resumes an existing order. It does not yet create a fresh customer order from a public menu. It does not enable live Stripe payments.
 
+## Receipt and RFC extension
+
+The customer receipt is a separate grant, not an extension of order-edit access. `POST /api/orders/{order_id}/receipt-link` (OWNER) creates `/receipt#<token>` for a confirmed order, valid for seven days. `DELETE` on that route revokes it; creating another replaces only the old receipt grant. Draft links remain one hour. Cancelled/refunded orders can still show an accurate receipt. Only the digest is stored.
+
+- `GET /api/customer/receipt`: same safe view as the order API, with `editable:false`, empty catalog, and `billing:{status,revision,rfc_masked}`. Status is `NOT_REQUESTED` or `DETAILS_RECEIVED`; no fiscal profile readback.
+- `PUT /api/customer/billing`: `{revision:<billing revision>,details:{rfc,legal_name,postal_code,tax_regime,cfdi_use,email?}}`. Returns only the billing summary. RFC is normalized uppercase; validation checks format only, never SAT registration. Postcode is a five-character numeric string preserving leading zeros. Regime and CFDI use are code inputs, not a fabricated complete SAT catalog. Email is optional. Stale submissions/storage conflicts return 409; malformed/extra fields return 422.
+- `POST /api/customer/checkout`: receipt grants may open the existing checkout for a confirmed eligible unpaid order. They cannot edit or confirm an order. Payment status comes from the backend, never the return query. Checkout sessions created earlier may retain their original return URL. The customer frontend tracks its active capability in tab storage and routes payment returns back to the appropriate view.
+- `GET /api/orders/{order_id}/billing`: OWNER-only full submission. Billing is omitted from bootstrap, all general order responses (including owner), event payloads, manager/staff views and notifications. It is stored in private tenant state: `ring_private.app_state` when the configured Supabase repository is active. No new public table or browser database access is needed.
+
+This collects an optional invoice request for the restaurant. It does not issue, stamp, validate with SAT, or send a CFDI. Receipts explicitly say they are not CFDI. Customer identity/login and reusable fiscal profiles are outside this feature.
+
+### WhatsApp delivery
+
+With `CUSTOMER_APP_ORIGIN` set, automatic confirmation delivery uses receipt mode and the old checkout notification is suppressed. The customer must explicitly choose optional `whatsapp_receipt:true` on `POST /api/customer/confirm`; the bound voice `tools/confirm_order` and owner confirm action accept the same optional flag. The voice agent must ask and record the customer's answer rather than infer consent from a phone number. Repeated confirmation does not resend. Existing deployments without a customer origin keep their legacy notification path.
+
+`POST /api/orders/{order_id}/receipt-send`, OWNER-only, requires `{customer_opted_in:true}` acknowledging customer consent at the order's existing phone. It records consent and explicitly sends/resends without repeating confirmation, POS sync or checkout creation. Resending rotates the receipt grant. The merchant detail has create/copy/revoke, explicit send/resend consent, actual notification status and a protected billing-details view. In customer-portal mode, the old `retry_notification` action also requires recorded consent and uses this receipt sender.
+
+Configure the server-only `TWILIO_RECEIPT_TEMPLATE_SID` separately from the existing checkout template. The approved Spanish template must mean: “Pedido {{1}} · {{2}} · Total {{3}} · {{5}}. Ver pedido, recibo y datos de facturación: {{4}}”. Variables are 1 order reference, 2 items summary, 3 amount/currency, 4 **complete** Lovable receipt URL, 5 payment state. Verify Twilio's approved template accommodates the complete fragment URL and item-summary formatting before real sends. Do not reuse a template whose fourth variable expects only a Stripe session suffix. No template is created or approved by this code.
+
+Missing consent skips sending; missing configuration reports `NOT_CONFIGURED`. Demo mode/order source produces `DEMO_PREVIEW` without a provider call. A durable claim precedes Twilio; status such as `QUEUED` means acknowledgement, not proven delivery/read. Known provider rejection is `FAILED`; ambiguous transport failure is `UNKNOWN`, never automatically retried. Explicit owner retries are allowed; a `PROCESSING` claim blocks competing sends for ten minutes, after which explicit recovery is permitted. A crash after provider acceptance may leave processing until manual recovery. Provider status callbacks/reconciliation are not implemented in this extension. Latest grant/billing fields survive concurrent delivery/POS merges.
+
+Public ingress must additionally allow only `/api/customer/receipt` GET/OPTIONS and `/api/customer/billing` PUT/OPTIONS. Existing exact-origin CORS and capability auth remain in force; keep all owner routes private. Apply optional voice-tool consent to its registered schema before using it. No real messages or live payments were sent during development.
+
 ## Server configuration
 Set `CUSTOMER_APP_ORIGIN` to the exact HTTPS origin of the customer app, with no path/query/fragment. Loopback HTTP is supported for local development. No new signing secret is required: each link contains 256 random bits and only its SHA-256 digest is stored in the existing durable tenant state.
 

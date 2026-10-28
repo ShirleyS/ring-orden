@@ -1395,7 +1395,37 @@ export async function handleRequest(
         );
       return json(cached.result);
     }
-    if (
+    const legacyReceiptRetry =
+      !!env.CUSTOMER_APP_ORIGIN &&
+      path[0] === "orders" &&
+      path[2] === "action" &&
+      body.action === "retry_notification";
+    if (legacyReceiptRetry && method === "POST") {
+      if (role !== "OWNER")
+        throw new HttpError(403, "Only the owner can send receipts.");
+      const order = findOrder(state, path[1]);
+      if (
+        !state.order_metadata[order.id]?.receipt_consent ||
+        state.order_metadata[order.id].receipt_consent?.phone !==
+          order.customer.phone
+      )
+        throw new HttpError(
+          422,
+          "Record customer WhatsApp consent with the receipt controls first.",
+        );
+      const notification = await sendPendingCustomerReceipt(
+        repo,
+        merchantId,
+        order.id,
+        env,
+        true,
+      );
+      const latest = await repo.loadByMerchant(merchantId);
+      return json({
+        order: metadata(latest!.state, findOrder(latest!.state, order.id)),
+        notification,
+      });
+    } else if (
       path[0] === "orders" &&
       path.length === 3 &&
       path[2] === "receipt-send" &&

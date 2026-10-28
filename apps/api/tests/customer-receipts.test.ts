@@ -186,6 +186,51 @@ test("no WhatsApp consent means no receipt or legacy notification is sent", asyn
   }
 });
 
+test("legacy notification retry cannot bypass receipt consent in customer-portal mode", async () => {
+  const f = await fixture(true, providerEnv);
+  const original = globalThis.fetch;
+  let sends = 0;
+  globalThis.fetch = async () => {
+    sends++;
+    return Response.json({ sid: "SMbypass", status: "queued" });
+  };
+  try {
+    assert.equal(
+      (
+        await f.owner(`orders/${f.order.id}/action`, "POST", {
+          action: "retry_notification",
+        })
+      ).status,
+      422,
+    );
+    assert.equal(sends, 0);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("missing receipt template reports unavailable without contacting Twilio", async () => {
+  const f = await fixture(true, {
+    ...providerEnv,
+    TWILIO_RECEIPT_TEMPLATE_SID: undefined,
+  });
+  const original = globalThis.fetch;
+  let sends = 0;
+  globalThis.fetch = async () => {
+    sends++;
+    return Response.json({ sid: "SMunexpected", status: "queued" });
+  };
+  try {
+    const result = await f.owner(`orders/${f.order.id}/receipt-send`, "POST", {
+      customer_opted_in: true,
+    });
+    assert.equal(result.data.status, "NOT_CONFIGURED");
+    assert.equal(sends, 0);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
 test("owner receipt sending requires consent, confirmed order, and never repeats fulfillment", async () => {
   const f = await fixture();
   assert.equal(
