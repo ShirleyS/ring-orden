@@ -11,6 +11,7 @@ declare namespace Cloudflare {
     MOJOAUTH_JWKS_URL?: string;
     MOJOAUTH_ISSUER?: string;
     MOJOAUTH_AUDIENCE?: string;
+    FIRECRAWL_API_KEY?: string;
     DEEPSEEK_API_KEY?: string;
     ELEVENLABS_API_KEY?: string;
     ELEVENLABS_AGENT_ID?: string;

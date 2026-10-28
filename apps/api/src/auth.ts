@@ -6,6 +6,7 @@ export interface RuntimeEnv {
   SESSION_SECRET?: string;
   DEMO_MODE?: string;
   TRUST_SITES_HEADERS?: string;
+  FIRECRAWL_API_KEY?: string;
   DEEPSEEK_API_KEY?: string;
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;

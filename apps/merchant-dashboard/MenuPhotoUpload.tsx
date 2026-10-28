@@ -1,0 +1,455 @@
+"use client";
+import { useEffect, useRef, useState } from "react";
+import {
+  ImagePlus,
+  UploadCloud,
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
+  X,
+} from "lucide-react";
+import { api } from "./types";
+import { supabaseAccessToken } from "./supabase-auth";
+
+type Draft = {
+  name: string;
+  price: number | null;
+  category: string;
+  description: string;
+  available: boolean;
+};
+type Row = Omit<Draft, "price"> & { price: string; included: boolean };
+type Extraction = { items: Draft[]; warnings: string[]; currency: string };
+
+async function normalizePhoto(file: File): Promise<Blob> {
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type))
+    throw new Error("Choose a JPG, PNG or WebP menu photo.");
+  if (file.size > 6 * 1024 * 1024)
+    throw new Error(
+      "Choose a photo smaller than 6 MB, or crop it to one menu page.",
+    );
+  const image = await createImageBitmap(file);
+  try {
+    if (image.width * image.height > 48_000_000)
+      throw new Error("Crop this photo to one menu page and try again.");
+    const scale = Math.min(1, 4096 / Math.max(image.width, image.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.width * scale));
+    canvas.height = Math.max(1, Math.round(image.height * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("This browser could not open the photo.");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob>((resolve, reject) =>
+      canvas.toBlob(
+        (value) =>
+          value
+            ? resolve(value)
+            : reject(new Error("This photo could not be prepared. Try a JPG.")),
+        "image/jpeg",
+        0.94,
+      ),
+    );
+    if (blob.size > 3 * 1024 * 1024)
+      throw new Error(
+        "Crop this photo to one menu page so the text stays sharp.",
+      );
+    return blob;
+  } finally {
+    image.close();
+  }
+}
+export default function MenuPhotoUpload({
+  currency,
+  existingNames,
+  onImported,
+}: {
+  currency: string;
+  existingNames: string[];
+  onImported: (count: number) => Promise<void>;
+}) {
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [rows, setRows] = useState<Row[]>([]);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState<"reading" | "saving" | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [preview, setPreview] = useState("");
+  const [fileName, setFileName] = useState("");
+  const [success, setSuccess] = useState<number | null>(null);
+  const [requestId, setRequestId] = useState(() => crypto.randomUUID());
+  const fileInput = useRef<HTMLInputElement>(null);
+  const request = useRef<AbortController | null>(null);
+  useEffect(() => {
+    let active = true;
+    api<{ configured: boolean }>("/menu/image/status")
+      .then((result) => {
+        if (active) setConfigured(result.configured);
+      })
+      .catch(() => {
+        if (active) setConfigured(null);
+      });
+    return () => {
+      active = false;
+      request.current?.abort();
+    };
+  }, []);
+  useEffect(
+    () => () => {
+      if (preview) URL.revokeObjectURL(preview);
+    },
+    [preview],
+  );
+  const key = (name: string) =>
+    name.trim().normalize("NFC").toLocaleLowerCase();
+  const existing = new Set(existingNames.map(key));
+  const selected = rows.filter((row) => row.included);
+  const selectedNames = new Set<string>();
+  let validation = "";
+  for (const row of selected) {
+    if (!row.name.trim() || !row.category.trim())
+      validation = "Enter a name and category for every selected product.";
+    if (
+      !row.price.trim() ||
+      !Number.isFinite(Number(row.price)) ||
+      Number(row.price) < 0 ||
+      Number(row.price) > 100000
+    )
+      validation = "Enter a readable price for every selected product.";
+    const name = key(row.name);
+    if (existing.has(name) || selectedNames.has(name))
+      validation = `${row.name || "This product"} is already in your menu or selected twice. Uncheck it or change its name.`;
+    selectedNames.add(name);
+  }
+  function update(index: number, changes: Partial<Row>) {
+    setRows((prior) =>
+      prior.map((row, i) => (i === index ? { ...row, ...changes } : row)),
+    );
+    setRequestId(crypto.randomUUID());
+    setError("");
+  }
+  async function readPhoto(file: File | undefined) {
+    if (!file || busy) return;
+    setError("");
+    setSuccess(null);
+    if (configured === false) {
+      setError(
+        "Menu photo reading needs Firecrawl setup in your hosting settings.",
+      );
+      return;
+    }
+    const controller = new AbortController();
+    request.current = controller;
+    setBusy("reading");
+    setRows([]);
+    setWarnings([]);
+    try {
+      const blob = await normalizePhoto(file);
+      if (controller.signal.aborted) return;
+      setPreview(URL.createObjectURL(file));
+      setFileName(file.name);
+      const form = new FormData();
+      form.set("file", blob, "menu-photo.jpg");
+      const token = await supabaseAccessToken();
+      const response = await fetch("/api/menu/image/preview", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: form,
+        signal: AbortSignal.any([
+          controller.signal,
+          AbortSignal.timeout(60000),
+        ]),
+      });
+      const result = (await response.json()) as Extraction & { error?: string };
+      if (!response.ok)
+        throw new Error(
+          result.error || "This menu could not be read. Try a clearer photo.",
+        );
+      const data = result as Extraction;
+      const seen = new Set(existing);
+      setRows(
+        data.items.map((item) => {
+          const duplicate = seen.has(key(item.name));
+          seen.add(key(item.name));
+          return {
+            ...item,
+            price: item.price === null ? "" : String(item.price),
+            included: !duplicate && item.price !== null,
+          };
+        }),
+      );
+      setWarnings(data.warnings);
+      setRequestId(crypto.randomUUID());
+    } catch (e) {
+      if (!controller.signal.aborted)
+        setError(
+          e instanceof Error ? e.message : "Menu reading failed. Try again.",
+        );
+    } finally {
+      if (!controller.signal.aborted) setBusy(null);
+      if (fileInput.current) fileInput.current.value = "";
+    }
+  }
+  async function addProducts() {
+    if (busy || validation || !selected.length) return;
+    setBusy("saving");
+    setError("");
+    try {
+      const result = await api<{ count: number }>("/menu/import", "POST", {
+        request_id: requestId,
+        items: selected.map((row) => ({
+          name: row.name.trim(),
+          category: row.category.trim(),
+          price: Number(row.price),
+          description: row.description,
+          available: true,
+        })),
+      });
+      setRows([]);
+      setWarnings([]);
+      setPreview("");
+      setSuccess(result.count);
+      await onImported(result.count);
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Products could not be added. Please try again.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+  return (
+    <section
+      className="panel menu-photo-section"
+      aria-labelledby="menu-photo-title"
+    >
+      <div className="menu-photo-heading">
+        <div>
+          <span className="eyebrow">FROM PHOTO TO PHONE ORDERS</span>
+          <h2 id="menu-photo-title">Your menu, ready in a photo.</h2>
+          <p>
+            Drop in a menu photo. We’ll read the products and prices, then you
+            review what gets added.
+          </p>
+        </div>
+        <span className="menu-photo-provider">Read with Firecrawl</span>
+      </div>
+      <input
+        ref={fileInput}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+        aria-label="Choose a menu photo"
+        hidden
+        onChange={(event) => void readPhoto(event.target.files?.[0])}
+      />
+      <button
+        type="button"
+        className={"menu-photo-drop " + (dragging ? "dragging" : "")}
+        disabled={!!busy}
+        onClick={() => fileInput.current?.click()}
+        onDragOver={(event) => {
+          event.preventDefault();
+          if (!busy) setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(event) => {
+          event.preventDefault();
+          setDragging(false);
+          if (event.dataTransfer.files.length !== 1) {
+            setError("Drop one menu photo at a time.");
+            return;
+          }
+          void readPhoto(event.dataTransfer.files[0]);
+        }}
+      >
+        {busy === "reading" ? (
+          <Loader2 size={28} className="menu-photo-spinner" />
+        ) : (
+          <UploadCloud size={28} />
+        )}
+        <strong>
+          {busy === "reading"
+            ? "Reading names and prices…"
+            : "Drop a menu photo here, or choose an image"}
+        </strong>
+        <span>JPG, PNG or WebP · Up to 6 MB · One menu page at a time</span>
+      </button>
+      {configured === false && (
+        <p className="menu-photo-note">
+          Menu photo reading needs a Firecrawl connection. Add FIRECRAWL_API_KEY
+          to this site’s hosting settings.
+        </p>
+      )}
+      {success !== null && (
+        <div className="info-banner" role="status">
+          <CheckCircle2 size={18} />
+          <p>
+            <strong>{success} products added.</strong> They’re now available in
+            your menu and to your ordering agent.
+          </p>
+        </div>
+      )}
+      {error && (
+        <div className="error-banner" role="alert">
+          <AlertCircle size={17} />
+          <p>{error}</p>
+        </div>
+      )}
+      {preview && (
+        <div className="menu-photo-source">
+          <img src={preview} alt="The menu photo being reviewed" />
+          <div>
+            <strong>{fileName}</strong>
+            <p>
+              {busy === "reading"
+                ? "Reading this photo. You can review the results before anything is added."
+                : "Compare every name and price with your original photo."}
+            </p>
+            <a href={preview} target="_blank" rel="noreferrer">
+              View full photo
+            </a>
+          </div>
+          {!busy && (
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Clear menu photo"
+              onClick={() => {
+                setPreview("");
+                setRows([]);
+                setWarnings([]);
+                setError("");
+              }}
+            >
+              <X size={18} />
+            </button>
+          )}
+        </div>
+      )}
+      {!!rows.length && (
+        <div className="menu-photo-review">
+          <div className="menu-photo-review-heading">
+            <h3>Review {rows.length} products</h3>
+            <span>Prices in {currency}</span>
+          </div>
+          {warnings.map((warning, i) => (
+            <p className="menu-photo-warning" key={i}>
+              {warning}
+            </p>
+          ))}
+          <p className="menu-photo-note">
+            Choose what to add. Unclear prices and existing products start
+            unchecked.
+          </p>
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>ADD</th>
+                  <th>PRODUCT NAME</th>
+                  <th>CATEGORY</th>
+                  <th>PRICE · {currency}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, index) => (
+                  <tr
+                    key={index}
+                    className={row.included ? "" : "menu-photo-excluded"}
+                  >
+                    <td>
+                      <input
+                        type="checkbox"
+                        aria-label={`Include ${row.name || "product " + (index + 1)}`}
+                        checked={row.included}
+                        disabled={!!busy}
+                        onChange={(event) =>
+                          update(index, { included: event.target.checked })
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        aria-label={`Product name ${index + 1}`}
+                        value={row.name}
+                        maxLength={120}
+                        disabled={!!busy}
+                        onChange={(event) =>
+                          update(index, { name: event.target.value })
+                        }
+                      />
+                      {existing.has(key(row.name)) && (
+                        <small>Already in your menu</small>
+                      )}
+                      {row.description && <small>{row.description}</small>}
+                    </td>
+                    <td>
+                      <input
+                        aria-label={`Category ${index + 1}`}
+                        value={row.category}
+                        maxLength={80}
+                        disabled={!!busy}
+                        onChange={(event) =>
+                          update(index, { category: event.target.value })
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        aria-label={`Price ${index + 1} in ${currency}`}
+                        type="number"
+                        min="0"
+                        max="100000"
+                        step="0.01"
+                        inputMode="decimal"
+                        value={row.price}
+                        placeholder="Check price"
+                        disabled={!!busy}
+                        onChange={(event) =>
+                          update(index, { price: event.target.value })
+                        }
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {validation && (
+            <p className="menu-photo-warning" role="alert">
+              {validation}
+            </p>
+          )}
+          <div className="menu-photo-actions">
+            <p>
+              Review every price. Selected products will be marked available.
+            </p>
+            <button
+              type="button"
+              className="primary"
+              disabled={!!busy || !!validation || !selected.length}
+              onClick={() => void addProducts()}
+            >
+              {busy === "saving" ? (
+                <>
+                  <Loader2 size={16} className="menu-photo-spinner" />
+                  Adding products…
+                </>
+              ) : (
+                <>
+                  <ImagePlus size={16} />
+                  Add {selected.length}{" "}
+                  {selected.length === 1 ? "product" : "products"} to menu
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}

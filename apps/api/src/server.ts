@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { extractMenuPhoto, ReviewedMenuItemSchema } from "./menu-image.ts";
 import {
   createOrder,
   applyOperation,
@@ -1398,6 +1399,11 @@ export async function handleRequest(
           );
         return json(result);
       }
+      if (path[0] === "menu" && path[1] === "image" && path[2] === "status") {
+        if (role !== "OWNER")
+          throw new HttpError(403, "Only the owner can import products.");
+        return json({ configured: Boolean(env.FIRECRAWL_API_KEY) });
+      }
       if (path[0] === "bootstrap") {
         const workspace = bootstrap(state, identity, env, role);
         workspace.orders = workspace.orders.map((order) =>
@@ -1468,6 +1474,22 @@ export async function handleRequest(
           mode: isDemo(env) ? "demo" : "live",
         });
       throw new HttpError(404, "Endpoint not found.");
+    }
+    if (
+      path[0] === "menu" &&
+      path[1] === "image" &&
+      path[2] === "preview" &&
+      method === "POST"
+    ) {
+      if (trustedTool || role !== "OWNER")
+        throw new HttpError(403, "Only the owner can import products.");
+      return json(
+        await extractMenuPhoto(
+          request,
+          env.FIRECRAWL_API_KEY ?? "",
+          state.merchant.currency || "MXN",
+        ),
+      );
     }
     const body = await bodyOf(request);
     if (!trustedTool) guardMerchantRoute(role, path, method, body);
@@ -1837,6 +1859,44 @@ export async function handleRequest(
         order: redactOrderForRole(metadata(state, order), role),
         ...(role === "OWNER" ? { checkout_url: checkoutUrl } : {}),
       };
+    } else if (
+      path[0] === "menu" &&
+      path[1] === "import" &&
+      method === "POST"
+    ) {
+      const batch = z
+        .object({
+          items: z.array(ReviewedMenuItemSchema).min(1).max(100),
+          request_id: z.string().uuid().optional(),
+        })
+        .strict()
+        .parse(body);
+      const names = new Set(
+        state.catalog.map((item) =>
+          item.name.trim().normalize("NFC").toLocaleLowerCase(),
+        ),
+      );
+      for (const item of batch.items) {
+        const key = item.name.normalize("NFC").toLocaleLowerCase();
+        if (names.has(key))
+          throw new HttpError(
+            409,
+            `Your menu already includes ${item.name}. Uncheck it or change its name before adding products.`,
+          );
+        names.add(key);
+      }
+      const added = batch.items.map((item) =>
+        CatalogItemSchema.parse({ ...item, id: uid("item"), modifiers: [] }),
+      );
+      state.catalog.push(...added);
+      audit(
+        state,
+        "menu.imported",
+        "Menu products added",
+        `${added.length} reviewed products added to the available menu.`,
+      );
+      result = { items: added, count: added.length };
+      status = 201;
     } else if (path[0] === "menu" && method === "PATCH") {
       const index = state.catalog.findIndex((item) => item.id === path[1]);
       if (index < 0) throw new HttpError(404, "Menu item not found.");

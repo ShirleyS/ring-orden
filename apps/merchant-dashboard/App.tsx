@@ -62,6 +62,7 @@ import {
 import { Obj, Workspace, money, label, time, api } from "./types";
 import { Configuration, Onboarding } from "./Configuration";
 import MenuImport from "./MenuImport";
+import MenuPhotoUpload from "./MenuPhotoUpload";
 import VoiceCall from "./VoiceCall";
 import CustomerOrderLink from "./CustomerOrderLink";
 import Customers from "./Customers";
@@ -847,6 +848,11 @@ export default function MerchantApp() {
                 <MenuPage
                   canEdit={data.user.role === "OWNER"}
                   catalog={data.catalog}
+                  currency={data.merchant.currency || "MXN"}
+                  onPhotoImported={async (count) => {
+                    await load();
+                    notify(count + " products added from your menu photo.");
+                  }}
                   onEdit={(i) => {
                     setSelected(i);
                     setModal("menu");
@@ -2030,6 +2036,8 @@ function MenuPage({
   onToggle,
   onAdd,
   onImport,
+  currency,
+  onPhotoImported,
   canEdit = true,
 }: {
   canEdit?: boolean;
@@ -2038,6 +2046,8 @@ function MenuPage({
   onToggle: (i: Obj) => void;
   onAdd: () => void;
   onImport: () => void;
+  currency: string;
+  onPhotoImported: (count: number) => Promise<void>;
 }) {
   const [tab, setTab] = useState("All items");
   const groups = ["All items", ...new Set(catalog.map((c) => c.category))];
@@ -2062,6 +2072,13 @@ function MenuPage({
           ) : undefined
         }
       />
+      {canEdit && (
+        <MenuPhotoUpload
+          currency={currency}
+          existingNames={catalog.map((item) => item.name)}
+          onImported={onPhotoImported}
+        />
+      )}
       <div className="list-toolbar">
         <div className="tabs">
           {groups.map((g) => (
