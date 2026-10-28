@@ -87,25 +87,36 @@ test("webhook connection test sends HEAD with saved bearer token and returns mea
     globalThis.fetch = original;
   }
 });
-test("Twilio account check exposes account state without returning auth token", async () => {
+test("Twilio messaging check supports a restricted API key without returning the key", async () => {
   const original = globalThis.fetch;
-  let requested = "";
-  globalThis.fetch = async (url) => {
-    requested = String(url);
+  let request: { url: string; authorization: string | null } | undefined;
+  globalThis.fetch = async (url, init) => {
+    request = {
+      url: String(url),
+      authorization: new Headers(init?.headers).get("Authorization"),
+    };
     return new Response(
-      JSON.stringify({ status: "active", auth_token: "never-return-this" }),
+      JSON.stringify({ messages: [] }),
       { headers: { "Content-Type": "application/json" } },
     );
   };
   try {
     const result = await client(new MemoryRepository(), {
       TWILIO_ACCOUNT_SID: "ACtest",
-      TWILIO_AUTH_TOKEN: "secret",
+      TWILIO_API_KEY_SID: "SKlimited",
+      TWILIO_API_KEY_SECRET: "restricted-secret",
     })("integrations/twilio/test");
     assert.equal(result.data.connected, true);
-    assert.ok(requested.endsWith("/Accounts/ACtest.json"));
     assert.equal(
-      JSON.stringify(result.data).includes("never-return-this"),
+      request?.url,
+      "https://api.twilio.com/2010-04-01/Accounts/ACtest/Messages.json?PageSize=1",
+    );
+    assert.equal(
+      request?.authorization,
+      "Basic " + btoa("SKlimited:restricted-secret"),
+    );
+    assert.equal(
+      JSON.stringify(result.data).includes("restricted-secret"),
       false,
     );
   } finally {

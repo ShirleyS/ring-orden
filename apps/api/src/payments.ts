@@ -1,4 +1,5 @@
 import type { RuntimeEnv } from "./auth.ts";
+import { twilioAuthorization } from "./twilio-auth.ts";
 import { HttpError } from "./auth.ts";
 import type { Order } from "../../../packages/ring-orden-core/src/index.ts";
 export async function hmacHex(
@@ -62,7 +63,6 @@ export function validatePaidSession(
 }
 export async function createCheckout(
   order: Order,
-  origin: string,
   env: RuntimeEnv,
 ): Promise<{ id: string; url: string }> {
   if (
@@ -73,10 +73,35 @@ export async function createCheckout(
       503,
       "Connect a Stripe test-mode key to create a checkout link.",
     );
+  const configuredOrigin = env.APP_ORIGIN?.trim();
+  if (!configuredOrigin)
+    throw new HttpError(
+      503,
+      "Set APP_ORIGIN to the public payment-return site before creating Checkout.",
+    );
+  let checkoutOrigin: URL;
+  try {
+    checkoutOrigin = new URL(configuredOrigin);
+  } catch {
+    throw new HttpError(503, "APP_ORIGIN must be a valid public origin.");
+  }
+  if (
+    (checkoutOrigin.protocol !== "https:" &&
+      !["localhost", "127.0.0.1", "[::1]"].includes(checkoutOrigin.hostname)) ||
+    checkoutOrigin.username ||
+    checkoutOrigin.password ||
+    checkoutOrigin.pathname !== "/" ||
+    checkoutOrigin.search ||
+    checkoutOrigin.hash
+  )
+    throw new HttpError(
+      503,
+      "APP_ORIGIN must be a clean HTTPS origin (HTTP is allowed only for local development).",
+    );
   const data = new URLSearchParams({
     mode: "payment",
-    success_url: `${origin}/?payment=success&order=${encodeURIComponent(order.id)}`,
-    cancel_url: `${origin}/?payment=cancelled&order=${encodeURIComponent(order.id)}`,
+    success_url: `${checkoutOrigin.origin}/payment-received.html?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${checkoutOrigin.origin}/payment-cancelled.html`,
     client_reference_id: order.id,
     "metadata[merchant_id]": order.merchant_id,
     "metadata[order_id]": order.id,
@@ -115,9 +140,10 @@ export async function sendWhatsApp(
   paymentUrl: string | undefined,
   env: RuntimeEnv,
 ): Promise<{ id: string; status: string }> {
+  const authorization = twilioAuthorization(env);
   if (
     !env.TWILIO_ACCOUNT_SID ||
-    !env.TWILIO_AUTH_TOKEN ||
+    !authorization ||
     !env.TWILIO_WHATSAPP_FROM
   )
     throw new HttpError(
@@ -159,8 +185,7 @@ export async function sendWhatsApp(
     {
       method: "POST",
       headers: {
-        Authorization:
-          "Basic " + btoa(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`),
+        Authorization: authorization,
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body: params,

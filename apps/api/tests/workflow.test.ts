@@ -446,6 +446,7 @@ test("order persists and delivery is claimed before Stripe call; confirming twic
   let checkoutCalls = 0;
   const client = makeClient(repo, "outbox-user", {
     STRIPE_SECRET_KEY: "sk_test_stub",
+    APP_ORIGIN: "https://ring.test",
   });
   let merchantId = "",
     orderId = "";

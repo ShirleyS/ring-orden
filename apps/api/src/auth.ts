@@ -11,6 +11,8 @@ export interface RuntimeEnv {
   STRIPE_WEBHOOK_SECRET?: string;
   TWILIO_ACCOUNT_SID?: string;
   TWILIO_AUTH_TOKEN?: string;
+  TWILIO_API_KEY_SID?: string;
+  TWILIO_API_KEY_SECRET?: string;
   TWILIO_WHATSAPP_FROM?: string;
   TWILIO_WHATSAPP_TEMPLATE_SID?: string;
   ELEVENLABS_API_KEY?: string;

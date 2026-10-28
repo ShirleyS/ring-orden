@@ -15,6 +15,35 @@ function turn(order: ReturnType<typeof createOrder>, text: string) {
   const r = interpretDemo(text, order);
   return { result: r, order: applyOperations(order, r.operations) };
 }
+test("an unfunded DeepSeek connection reports a billing blocker rather than a model quality score", async () => {
+  let requests = 0;
+  const adapter = new OpenAICompatibleAdapter({
+    provider: "deepseek",
+    model: "deepseek-flash",
+    fetch: async () => {
+      requests++;
+      return Response.json({ error: { message: "Insufficient Balance" } }, { status: 402 });
+    },
+  });
+  const report = await runCompatibilityTest(adapter);
+  assert.equal(report.status, "Connection failed");
+  assert.equal(report.score, null);
+  assert.match(JSON.stringify(report), /balance|credit/i);
+  assert.equal(requests, 1, "Do not repeat a request that requires account action");
+  assert.equal(report.results.length, 1, "Stop before grading cases the provider cannot run");
+});
+test("an invalid API key gives a useful connection error without exposing provider text or credentials", async () => {
+  const adapter = new OpenAICompatibleAdapter({
+    provider: "deepseek",
+    model: "deepseek-flash",
+    apiKey: "private-test-key",
+    fetch: async () => new Response("upstream echoed private-test-key", { status: 401 }),
+  });
+  const connection = await adapter.testConnection();
+  assert.equal(connection.connected, false);
+  assert.match(connection.error ?? "", /API key/i);
+  assert.equal(JSON.stringify(connection).includes("private-test-key"), false);
+});
 test("main difficult transaction resolves references and asks ambiguity", () => {
   let o = createOrder("m");
   o = turn(

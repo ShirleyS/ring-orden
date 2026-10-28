@@ -32,6 +32,46 @@ Provider API variables are listed in [.env.example](../.env.example) and [backen
 
 A private project blocks unauthenticated external provider callbacks at its hosting gate. For live callbacks, use a separate explicitly configured ingress that preserves bearer/signature validation and shares the same storage. Merchant-facing routes must remain authenticated.
 
+## Public provider ingress
+
+`netlify/ingress-functions/` and `netlify/ingress.ts` define a second, API-only Netlify project for provider callbacks. Keep `ring-orden-shirleys` private. The ingress project is internet-reachable because ElevenLabs and Stripe must call it; its only supported routes are the bearer-protected order tools in `netlify/ingress.ts`, a Stripe webhook verified with `STRIPE_WEBHOOK_SECRET`, and a minimal health response. It does not serve merchant dashboard, bootstrap, settings, or order-list routes. The static page contains no application data.
+
+Create a separate, empty manual-deploy Netlify project named `ring-orden-api` in the Shirley team. Do not link it to a Git repository with automatic builds: this repository is already linked to the private merchant app. Do not enable Netlify Private project protection on this callback project: provider callbacks cannot complete its sign-in challenge. Keep the merchant app private. Deploy from the repository root with the API project's site ID explicitly. The `--no-build` flag prevents running the private merchant app's build command; the function declares its own public paths and rate limit in code:
+
+```sh
+netlify deploy --prod --no-build --dir=public-ingress --functions=netlify/ingress-functions --site="$NETLIFY_INGRESS_SITE_ID"
+```
+
+Add these variables to the API project's **Functions** scope in Netlify, for Production only:
+
+| Variable | Purpose |
+| --- | --- |
+| `SUPABASE_URL` | Same Ring Orden Supabase project URL as the private app. |
+| `SUPABASE_SERVER_SECRET` | Same server-only Supabase secret key; enter it directly in Netlify. |
+| `AGENT_TOOL_SECRET` | A long, random bearer secret; add the same value to an ElevenLabs workspace secret. |
+| `AGENT_MERCHANT_ID` | The exact merchant ID from the signed-in merchant app’s `/api/bootstrap` response. |
+| `STRIPE_WEBHOOK_SECRET` | Required only when Stripe callbacks are enabled; use the signing secret for the webhook endpoint configured to this API project's `/api/webhooks/stripe` URL. |
+
+`SUPABASE_SERVER_SECRET`, `AGENT_TOOL_SECRET`, and Stripe/Twilio/POS API credentials must never be build-time or browser variables. The ingress fails closed if Supabase or the relevant route secrets are absent. After saving variables, redeploy the API project and verify `GET /api/health` returns `{"status":"ok"}`. A successful health response indicates configuration is present; it does not make merchant data public.
+
+Add provider credentials to this API project's Functions scope only when enabling those services:
+
+| Variables | Used for |
+| --- | --- |
+| `STRIPE_SECRET_KEY` | Creating Checkout links after order confirmation. Keep in Stripe test mode until the live business setup is ready. |
+| `APP_ORIGIN` | Required with `STRIPE_SECRET_KEY`; set on both sites to the public API site's HTTPS origin so Checkout returns to neutral receipt pages instead of the private merchant dashboard. |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET`, `TWILIO_WHATSAPP_FROM` | Sending WhatsApp order confirmations from the API function. Create a restricted Twilio API key with Messaging read/write permissions. `TWILIO_AUTH_TOKEN` remains supported as a legacy fallback. A template SID is also needed for business-initiated messages outside WhatsApp's customer-service window. |
+| `DEEPSEEK_API_KEY` | Backend order interpretation only if a model key is not stored in the merchant's server-side model settings. |
+| `SQUARE_ACCESS_TOKEN`, `SQUARE_LOCATION_ID`, `SQUARE_ENVIRONMENT` | Square POS delivery when the merchant has configured catalog mappings. |
+
+For inbound calls, import the active Twilio phone number in ElevenLabs' **Phone Numbers** page with a restricted Twilio API key that has the phone-number permissions ElevenLabs needs, then assign the ordering agent. ElevenLabs installs the number's call-routing webhooks; Ring Orden's public API remains the agent's order-tool endpoint. The [native ElevenLabs integration](https://elevenlabs.io/docs/eleven-agents/phone-numbers/twilio-integration/native-integration/) documents purchased, provisioned Twilio numbers for inbound calls; verified caller IDs are outbound-only. A Twilio trial can be used for limited console tests, but it does not meet the documented purchased-number prerequisite for this inbound agent setup. Twilio recommends [restricted API keys](https://www.twilio.com/docs/iam/api-keys) over account-wide credentials. Create separate restricted keys for number management and Ring Orden's WhatsApp sending where practical. Never paste Twilio credentials into chat; enter them directly in the provider dashboards.
+
+The private merchant project's Functions scope separately needs `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`, and the same `AGENT_MERCHANT_ID` for its signed-call URL endpoint. Do not copy the Supabase server secret into ElevenLabs. Configure ElevenLabs webhook tools from the generated definitions in `prompts/elevenlabs-tool-configs.mjs`, point them at the API project's HTTPS origin, and select the ElevenLabs workspace secret that holds `AGENT_TOOL_SECRET` for the Authorization header. The OpenAPI file is the backend contract and documentation; the generator produces ElevenLabs-specific webhook schemas.
+
+For the voice agent’s model, choose **DeepSeek Flash 4.1** in the ElevenLabs LLM selector. ElevenLabs currently lists it as natively supported and hosted on ElevenLabs infrastructure. This is separate from the Ring Orden order-interpreter model selector: that server-side interpreter uses the merchant’s configured backend model and its own server-only credential. Keep a fallback model enabled for voice availability and start with reasoning summaries off to reduce latency and avoid retaining extra reasoning text.
+
+Before publishing or enabling the voice agent, review the configured workspace/menu data and decide whether caller phone/name metadata should be sent to ElevenLabs. A voice session can transmit caller ID, spoken order text, menu/business details, and saved order information to fulfill requests. Do not run a live call until a Twilio number and its inbound route have been explicitly set up.
+
 ## Source
 
 Primary repository: https://github.com/ShirleyS/ring-orden . The Netlify deployment belongs to the Shirley team and is linked locally through ignored `.netlify/state.json`.

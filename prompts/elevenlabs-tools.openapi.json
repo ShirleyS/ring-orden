@@ -380,15 +380,25 @@
                 "type": "object",
                 "properties": {
                   "session_id": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The server-generated ID returned by create_session."
                   },
                   "reason": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Why the caller asked for human assistance."
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "pattern": "\\S",
+                    "description": "Unique ID for this escalation; reuse unchanged on retries."
                   }
                 },
                 "required": [
                   "session_id",
-                  "reason"
+                  "reason",
+                  "request_id"
                 ],
                 "additionalProperties": false
               }
@@ -428,15 +438,25 @@
                 "type": "object",
                 "properties": {
                   "session_id": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The server-generated ID returned by create_session."
                   },
                   "reason": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The unresolved issue as explained by the caller."
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "pattern": "\\S",
+                    "description": "Unique ID for this escalation; reuse unchanged on retries."
                   }
                 },
                 "required": [
                   "session_id",
-                  "reason"
+                  "reason",
+                  "request_id"
                 ],
                 "additionalProperties": false
               }

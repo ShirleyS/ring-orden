@@ -50,6 +50,7 @@ import {
 import { seedTenant } from "./seed.ts";
 import { SettingsSchemas, orderingIsOpen } from "./settings.ts";
 import { retryDuePOS } from "./pos-retry.ts";
+import { twilioAuthorization } from "./twilio-auth.ts";
 import {
   createCheckout,
   expireCheckout,
@@ -190,9 +191,9 @@ function integrations(env: RuntimeEnv, state: TenantState) {
       name: "Twilio",
       category: "Phone & WhatsApp",
       description: "Phone routing and order notifications",
-      configured: !!(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN),
+      configured: !!(env.TWILIO_ACCOUNT_SID && twilioAuthorization(env)),
       status:
-        env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN
+        env.TWILIO_ACCOUNT_SID && twilioAuthorization(env)
           ? "configured"
           : "setup_required",
     },
@@ -465,7 +466,6 @@ async function afterConfirmation(
   order: Order,
   session: Session | undefined,
   env: RuntimeEnv,
-  _origin: string,
 ) {
   const meta = state.order_metadata[order.id] ?? {
     pos_status: "DASHBOARD_ONLY",
@@ -539,7 +539,6 @@ async function deliverPendingOrder(
   merchantId: string,
   orderId: string,
   env: RuntimeEnv,
-  origin: string,
 ): Promise<Order | undefined> {
   const loaded = await repo.loadByMerchant(merchantId);
   if (!loaded) return;
@@ -553,7 +552,7 @@ async function deliverPendingOrder(
     order = await syncOrder(state, order, env);
     if (env.STRIPE_SECRET_KEY) {
       try {
-        const checkout = await createCheckout(order, origin, env);
+        const checkout = await createCheckout(order, env);
         meta.checkout_id = checkout.id;
         meta.checkout_url = checkout.url;
         if (order.status === "CONFIRMED")
@@ -646,7 +645,6 @@ async function processTurn(
   session: Session,
   utterance: string,
   env: RuntimeEnv,
-  origin: string,
 ) {
   let order = findOrder(state, session.order_id);
   const wasConfirmed = [
@@ -949,7 +947,7 @@ async function processTurn(
     session.status = "ESCALATED";
   }
   if (order.status === "CONFIRMED")
-    order = await afterConfirmation(state, order, session, env, origin);
+    order = await afterConfirmation(state, order, session, env);
   replaceOrder(state, order);
   return {
     order: metadata(state, order),
@@ -1338,7 +1336,7 @@ export async function handleRequest(
       ((path[0] === "sessions" && !path[1]) ||
         (path[0] === "tools" && path[1] === "create_session"))
     ) {
-      let order = createOrder(merchantId);
+      const order = createOrder(merchantId);
       order.source = isDemo(env) ? "demo" : "voice";
       order.customer = {
         name: z.string().max(120).optional().parse(body.name) ?? null,
@@ -1390,7 +1388,6 @@ export async function handleRequest(
         session,
         z.string().trim().min(1).max(1500).parse(body.utterance),
         env,
-        url.origin,
       );
     } else if (path[0] === "orders" && !path[1] && method === "POST") {
       let order = createOrder(merchantId);
@@ -1505,7 +1502,6 @@ export async function handleRequest(
             order,
             undefined,
             env,
-            url.origin,
           );
         } else if (
           ["CANCELLED", "REFUNDED", "REFUND_PENDING"].includes(order.status)
@@ -1550,7 +1546,7 @@ export async function handleRequest(
             409,
             "Only confirmed unpaid orders can create checkout.",
           );
-        const checkout = await createCheckout(order, url.origin, env);
+        const checkout = await createCheckout(order, env);
         state.order_metadata[order.id] = {
           ...state.order_metadata[order.id],
           checkout_id: checkout.id,
@@ -1817,14 +1813,11 @@ export async function handleRequest(
         };
       } else if (path[1] === "twilio") {
         const started = performance.now();
+        const authorization = twilioAuthorization(env);
         const response = await fetch(
-          `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(env.TWILIO_ACCOUNT_SID!)}.json`,
+          `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(env.TWILIO_ACCOUNT_SID!)}/Messages.json?PageSize=1`,
           {
-            headers: {
-              Authorization:
-                "Basic " +
-                btoa(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`),
-            },
+            headers: { Authorization: authorization! },
             redirect: "error",
             signal: AbortSignal.timeout(8000),
           },
@@ -1832,17 +1825,15 @@ export async function handleRequest(
         if (!response.ok)
           throw new HttpError(
             502,
-            "Twilio account credentials could not be verified.",
+            "Twilio messaging credentials could not be verified.",
           );
-        const account = (await response.json()) as { status?: string };
         result = {
           provider: "twilio",
-          connected: account.status === "active",
-          status: account.status === "active" ? "connected" : "inactive",
+          connected: true,
+          status: "connected",
           latency_ms: Math.round(performance.now() - started),
-          account_status: account.status,
           message:
-            "Account credentials checked. WhatsApp sender approval and recipient opt-in are verified separately.",
+            "Messaging credentials checked. WhatsApp sender approval and recipient opt-in are verified separately.",
         };
       } else if (path[1] === "deepseek") {
         result = {
@@ -2029,13 +2020,12 @@ export async function handleRequest(
           session,
           z.string().min(1).max(1500).parse(body.utterance),
           env,
-          url.origin,
         );
       else if (tool === "confirm_order") {
         if (body.confirmed !== true)
           throw new HttpError(422, "Explicit customer confirmation required.");
         const utterance = z.string().min(1).max(1500).parse(body.utterance);
-        result = await processTurn(state, session, utterance, env, url.origin);
+        result = await processTurn(state, session, utterance, env);
       } else if (["request_human", "escalate_issue"].includes(tool)) {
         let order = findOrder(state, session.order_id);
         order = applyOperation(
@@ -2085,7 +2075,6 @@ export async function handleRequest(
           merchantId,
           orderId,
           env,
-          url.origin,
         );
         if (
           delivered &&
