@@ -15,6 +15,21 @@ await build({
   target: "node24",
   outfile: path.join(output, "server", "handler.mjs"),
 });
+await build({
+  entryPoints: [path.join(root, "packages", "browser-phone-relay", "src", "index.ts")],
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node24",
+  outfile: path.join(output, "server", "browser-phone-relay.mjs"),
+});
+await writeFile(
+  path.join(output,"functions-source","browser-phone-relay.mjs"),
+  `import { handleBrowserPhoneRelay } from "../server/browser-phone-relay.mjs";
+export default function relay(request){return handleBrowserPhoneRelay(request,process.env);}
+export const config={path:["/api/browser-phone/transport","/api/browser-phone/relay","/api/browser-phone/probe"],rateLimit:{windowLimit:20,windowSize:60,aggregateBy:["ip"]}};
+`,
+);
 await copyFile(
   path.join(root, "public-ingress", "index.html"),
   path.join(output, "public", "index.html"),
