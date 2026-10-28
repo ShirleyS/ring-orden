@@ -1,6 +1,7 @@
 import type { RuntimeEnv } from "./auth.ts";
 import { twilioAuthorization } from "./twilio-auth.ts";
 import { HttpError } from "./auth.ts";
+import { customerOrigin } from "./customer-orders.ts";
 import type { Order } from "../../../packages/ring-orden-core/src/index.ts";
 export async function hmacHex(
   secret: string,
@@ -64,6 +65,7 @@ export function validatePaidSession(
 export async function createCheckout(
   order: Order,
   env: RuntimeEnv,
+  returnUrls?: { success: string; cancel: string },
 ): Promise<{ id: string; url: string }> {
   if (
     !env.STRIPE_SECRET_KEY?.startsWith("sk_test_") &&
@@ -73,35 +75,46 @@ export async function createCheckout(
       503,
       "Connect a Stripe test-mode key to create a checkout link.",
     );
-  const configuredOrigin = env.APP_ORIGIN?.trim();
-  if (!configuredOrigin)
-    throw new HttpError(
-      503,
-      "Set APP_ORIGIN to the public payment-return site before creating Checkout.",
-    );
-  let checkoutOrigin: URL;
-  try {
-    checkoutOrigin = new URL(configuredOrigin);
-  } catch {
-    throw new HttpError(503, "APP_ORIGIN must be a valid public origin.");
+  const portalOrigin =
+    !returnUrls && env.CUSTOMER_APP_ORIGIN ? customerOrigin(env) : undefined;
+  let checkoutOrigin: URL | undefined;
+  if (!returnUrls && !portalOrigin) {
+    const configuredOrigin = env.APP_ORIGIN?.trim();
+    if (!configuredOrigin)
+      throw new HttpError(
+        503,
+        "Set APP_ORIGIN to the public payment-return site before creating Checkout.",
+      );
+    try {
+      checkoutOrigin = new URL(configuredOrigin);
+    } catch {
+      throw new HttpError(503, "APP_ORIGIN must be a valid public origin.");
+    }
+    if (
+      (checkoutOrigin.protocol !== "https:" &&
+        !["localhost", "127.0.0.1", "[::1]"].includes(checkoutOrigin.hostname)) ||
+      checkoutOrigin.username ||
+      checkoutOrigin.password ||
+      checkoutOrigin.pathname !== "/" ||
+      checkoutOrigin.search ||
+      checkoutOrigin.hash
+    )
+      throw new HttpError(
+        503,
+        "APP_ORIGIN must be a clean HTTPS origin (HTTP is allowed only for local development).",
+      );
   }
-  if (
-    (checkoutOrigin.protocol !== "https:" &&
-      !["localhost", "127.0.0.1", "[::1]"].includes(checkoutOrigin.hostname)) ||
-    checkoutOrigin.username ||
-    checkoutOrigin.password ||
-    checkoutOrigin.pathname !== "/" ||
-    checkoutOrigin.search ||
-    checkoutOrigin.hash
-  )
-    throw new HttpError(
-      503,
-      "APP_ORIGIN must be a clean HTTPS origin (HTTP is allowed only for local development).",
-    );
   const data = new URLSearchParams({
     mode: "payment",
-    success_url: `${checkoutOrigin.origin}/payment-received.html?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${checkoutOrigin.origin}/payment-cancelled.html`,
+    success_url:
+      returnUrls?.success ??
+      (portalOrigin ? `${portalOrigin}/order?payment=returned` : undefined) ??
+      `${checkoutOrigin!.origin}/payment-received.html?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url:
+      returnUrls?.cancel ??
+      (portalOrigin ? `${portalOrigin}/order?payment=cancelled` : undefined) ??
+      `${checkoutOrigin!.origin}/payment-cancelled.html`,
+
     client_reference_id: order.id,
     "metadata[merchant_id]": order.merchant_id,
     "metadata[order_id]": order.id,
@@ -139,6 +152,7 @@ export async function sendWhatsApp(
   order: Order,
   paymentUrl: string | undefined,
   env: RuntimeEnv,
+  receipt = false,
 ): Promise<{ id: string; status: string }> {
   const authorization = twilioAuthorization(env);
   if (
@@ -164,8 +178,16 @@ export async function sendWhatsApp(
       : "whatsapp:" + env.TWILIO_WHATSAPP_FROM,
     To: "whatsapp:" + order.customer.phone,
   });
-  if (env.TWILIO_WHATSAPP_TEMPLATE_SID) {
-    params.set("ContentSid", env.TWILIO_WHATSAPP_TEMPLATE_SID);
+  const template = receipt
+    ? env.TWILIO_RECEIPT_TEMPLATE_SID
+    : env.TWILIO_WHATSAPP_TEMPLATE_SID;
+  if (receipt && !template)
+    throw new HttpError(
+      503,
+      "Configure the dedicated receipt WhatsApp template.",
+    );
+  if (template) {
+    params.set("ContentSid", template);
     params.set(
       "ContentVariables",
       JSON.stringify({
@@ -173,6 +195,18 @@ export async function sendWhatsApp(
         "2": summary,
         "3": `${order.total.toFixed(2)} ${order.currency}`,
         "4": paymentUrl ?? "Pay at pickup",
+        ...(receipt
+          ? {
+              "5":
+                order.payment_status === "PAID"
+                  ? "Pagado"
+                  : ["CANCELLED", "REFUND_PENDING", "REFUNDED"].includes(
+                        order.status,
+                      )
+                    ? "Consulta el estado actualizado"
+                    : "Pago pendiente",
+            }
+          : {}),
       }),
     );
   } else
@@ -204,6 +238,11 @@ export async function sendWhatsApp(
     );
   return { id: result.sid, status: result.status };
 }
+export const sendReceiptWhatsApp = (
+  order: Order,
+  receiptUrl: string,
+  env: RuntimeEnv,
+) => sendWhatsApp(order, receiptUrl, env, true);
 /** Invalidate the old amount before editing a confirmed-but-unpaid transaction. */
 export async function expireCheckout(
   checkoutId: string,

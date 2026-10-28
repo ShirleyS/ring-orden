@@ -4,6 +4,7 @@ import { handleRequest } from "../../apps/api/src/server.ts";
 import type { RuntimeEnv } from "../../apps/api/src/auth.ts";
 import { NetlifyRepository } from "../../apps/api/src/netlify-repository.ts";
 import { adaptNetlifyRequest } from "../adapter.ts";
+import { handleMojoAuthRequest } from "../../apps/api/src/mojoauth-login.ts";
 export default async function api(
   request: Request,
   context: Context,
@@ -13,6 +14,8 @@ export default async function api(
     context,
     process.env as RuntimeEnv,
   );
+  const authentication = await handleMojoAuthRequest(secured, env);
+  if (authentication) return authentication;
   if (env.SUPABASE_URL || env.SUPABASE_SERVER_SECRET)
     return handleRequest(secured, env);
   try {

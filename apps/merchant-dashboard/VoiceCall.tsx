@@ -244,7 +244,7 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
             refresh();
           }
         },
-      };
+      } satisfies Partial<Parameters<typeof Conversation.startSession>[0]>;
       const pending = payload.signed_url
         ? Conversation.startSession({
             signedUrl: payload.signed_url,

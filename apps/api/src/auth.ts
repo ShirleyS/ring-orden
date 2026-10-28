@@ -1,8 +1,10 @@
 export interface RuntimeEnv {
+  TWILIO_RECEIPT_TEMPLATE_SID?: string;
   DB?: D1Database;
   MOJOAUTH_JWKS_URL?: string;
   MOJOAUTH_ISSUER?: string;
   MOJOAUTH_AUDIENCE?: string;
+  MOJOAUTH_CLIENT_SECRET?: string;
   SESSION_SECRET?: string;
   DEMO_MODE?: string;
   TRUST_SITES_HEADERS?: string;
@@ -26,6 +28,7 @@ export interface RuntimeEnv {
   N8N_WEBHOOK_URL?: string;
   N8N_WEBHOOK_SECRET?: string;
   APP_ORIGIN?: string;
+  CUSTOMER_APP_ORIGIN?: string;
   SUPABASE_URL?: string;
   SUPABASE_PUBLISHABLE_KEY?: string;
   SUPABASE_SERVER_SECRET?: string;
@@ -75,12 +78,14 @@ export function validateMutationOrigin(request: Request) {
 export async function verifyMojoToken(
   token: string,
   env: RuntimeEnv,
+  expectedNonce?: string,
 ): Promise<Identity> {
   if (!env.MOJOAUTH_JWKS_URL || !env.MOJOAUTH_ISSUER || !env.MOJOAUTH_AUDIENCE)
     throw new HttpError(
       503,
       "Configure MojoAuth JWKS URL, issuer and audience first.",
     );
+  if (token.length > 16384) throw new HttpError(401, "Invalid sign in token.");
   const parts = token.split(".");
   if (parts.length !== 3) throw new HttpError(401, "Invalid sign in token.");
   let header: { alg: string; kid: string };
@@ -96,7 +101,10 @@ export async function verifyMojoToken(
   const url = new URL(env.MOJOAUTH_JWKS_URL);
   if (url.protocol !== "https:")
     throw new HttpError(503, "MojoAuth key URL must use HTTPS.");
-  const response = await fetch(url, { signal: AbortSignal.timeout(7000) });
+  const response = await fetch(url, {
+    redirect: "error",
+    signal: AbortSignal.timeout(7000),
+  });
   if (!response.ok)
     throw new HttpError(503, "MojoAuth signing keys unavailable.");
   const jwks = (await response.json()) as {
@@ -129,7 +137,16 @@ export async function verifyMojoToken(
       audience === env.MOJOAUTH_AUDIENCE ||
       (Array.isArray(audience) && audience.includes(env.MOJOAUTH_AUDIENCE))
     ) ||
-    typeof claims.sub !== "string"
+    typeof claims.sub !== "string" ||
+    !claims.sub ||
+    (expectedNonce !== undefined &&
+      (claims.nonce !== expectedNonce ||
+        typeof claims.iat !== "number" ||
+        claims.iat > now + 30 ||
+        (Array.isArray(audience) &&
+          audience.length > 1 &&
+          claims.azp !== env.MOJOAUTH_AUDIENCE) ||
+        (claims.azp !== undefined && claims.azp !== env.MOJOAUTH_AUDIENCE)))
   )
     throw new HttpError(401, "Your sign in expired or could not be verified.");
   return {
@@ -199,7 +216,10 @@ export async function identityFromRequest(
       throw new HttpError(503, "Supabase sign-in is not configured.");
     const token = bearer.slice(7).trim();
     if (!token || token.length > 8192)
-      throw new HttpError(401, "Your sign in expired or could not be verified.");
+      throw new HttpError(
+        401,
+        "Your sign in expired or could not be verified.",
+      );
     return verifySupabaseToken(token, env);
   }
   if (bearer?.startsWith("Bearer ") && env.MOJOAUTH_JWKS_URL)

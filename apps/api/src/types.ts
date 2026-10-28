@@ -4,6 +4,7 @@ import type {
   Operation,
 } from "../../../packages/ring-orden-core/src/index.ts";
 import type { CorrectionMemory } from "../../../packages/ring-orden-memory/src/index.ts";
+import type { BillingSubmission } from "./customer-receipts.ts";
 export type JsonObject = Record<string, unknown>;
 export interface Turn {
   id: string;
@@ -38,6 +39,16 @@ export interface AuditEvent {
   data?: unknown;
 }
 export interface OrderMetadata {
+  customer_link?: { hash: string; expires_at: string };
+  receipt_link?: { hash: string; expires_at: string };
+  billing?: BillingSubmission;
+  receipt_consent?: { phone: string; recorded_at: string };
+  receipt_notification?: {
+    claim: string;
+    status: string;
+    updated_at: string;
+    provider_id?: string;
+  };
   pos_status: string;
   notification_status: string;
   checkout_id?: string;

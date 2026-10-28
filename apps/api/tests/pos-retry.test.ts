@@ -75,3 +75,23 @@ test("stale retry lease can recover with provider idempotency retained", async (
   });
   assert.equal(called, true);
 });
+
+test("retry completion preserves a customer link revoked while the provider runs", async () => {
+  const { repo, id, orderId } = await fixture();
+  const row = (await repo.loadByMerchant(id))!;
+  row.state.order_metadata[orderId].customer_link = {
+    hash: "old-grant",
+    expires_at: new Date(Date.now() + 60_000).toISOString(),
+  };
+  await repo.saveTrusted(id, row.revision, row.state);
+  await retryDuePOS(repo, id, async (state, order) => {
+    const latest = (await repo.loadByMerchant(id))!;
+    delete latest.state.order_metadata[orderId].customer_link;
+    await repo.saveTrusted(id, latest.revision, latest.state);
+    state.order_metadata[orderId].pos_status = "SYNCED";
+    return order;
+  });
+  const final = (await repo.loadByMerchant(id))!;
+  assert.equal(final.state.order_metadata[orderId].pos_status, "SYNCED");
+  assert.equal(final.state.order_metadata[orderId].customer_link, undefined);
+});

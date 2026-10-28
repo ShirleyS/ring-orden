@@ -20,6 +20,34 @@ Set project visibility to **Private**, covering production and previews, in the 
 
 Netlify's project privacy settings are controlled in its dashboard, not through a public CLI/API. Without private-project protection or configured MojoAuth, the backend correctly requires sign-in. Do not disable authentication to make a public deploy show data.
 
+## MojoAuth hosted merchant sign-in
+
+The dashboard offers **Sign in with MojoAuth** when these five server variables are configured. Set them in Netlify's **Functions** scope for **Production**, then redeploy the merchant application with this source. Neither a Vite variable nor a client-side secret is needed.
+
+| Variable                 | RingOrden value                                                                            |
+| ------------------------ | ------------------------------------------------------------------------------------------ |
+| `MOJOAUTH_ISSUER`        | `https://ringorden-4e6f326a.auth.mojoauth.com`                                             |
+| `MOJOAUTH_JWKS_URL`      | `https://ringorden-4e6f326a.auth.mojoauth.com/.well-known/jwks.json`                       |
+| `MOJOAUTH_AUDIENCE`      | `53e2719d-b908-4ff2-8418-cb4a0c306502` (public Client ID)                                  |
+| `MOJOAUTH_CLIENT_SECRET` | The matching application's private Client Secret; mark secret, never put it in chat or Git |
+| `SESSION_SECRET`         | The generated random 64-character value; mark secret                                       |
+
+In MojoAuth, register this exact Allowed Callback URL on that application:
+
+`https://ring-orden-shirleys.netlify.app/api/auth/mojo/callback`
+
+Enable Authorization Code and the `openid`, `profile`, `email` scopes. The server uses the project's discovery document, PKCE S256, browser-bound state and nonce, and verifies the ID token's RS256 signature, issuer, audience and expiry. The token endpoint currently discovered is `/oauth2/token`; the application-details screen advertises `/oauth/token`. Discovery is authoritative; this code does not guess or hardcode either endpoint. Client credentials and provider tokens stay on the server. Only an encrypted ten-minute transaction cookie and the eight-hour HttpOnly RingOrden session reach the browser.
+
+Routes: GET `/api/auth/config` exposes readiness only; GET `/api/auth/mojo/login` starts sign-in; GET `/api/auth/mojo/callback` completes it; same-origin POST `/api/auth/logout` ends the RingOrden session and clears remembered workspace selection and pending login state. Successful login also resets workspace selection so another account cannot inherit a stale selection. These routes work before database initialization. A signed-in MojoAuth merchant sees **Sign out of workspace**. This ends the RingOrden session, not the MojoAuth provider's SSO session; choosing sign-in again may reuse that SSO session.
+
+MojoAuth is the primary login choice when configured; **Use existing email sign-in** retains access for existing Supabase merchants. API requests try the RingOrden cookie first and attempt Supabase only after a 401. A failed Supabase refresh cannot block a valid cookie session, and a workspace permission failure never silently switches provider identities.
+
+Keep the existing Supabase database variables. Storage and login provider are independent. MojoAuth subjects use `mojo:` identities and do not automatically inherit a workspace created through Sites, Netlify or Supabase, even when the email matches. Verified ownership and an explicit migration are needed to move an existing workspace; this change does not implement identity linking.
+
+A private Netlify project's hosting gate still comes before application login. Keeping it private preserves that gate, so MojoAuth is not a replacement for Netlify's initial gate in this configuration. Do not expose merchant routes through the public provider-ingress project. Customer receipt/order links retain their independent capabilities and do not gain account-wide purchase history from merchant login.
+
+**Verification boundary:** local signed-token/PKCE tests and application build cover the source flow. A real hosted login, registered callback, matching Client Secret, Netlify environment changes and production deployment must be verified separately. This source change does not configure or deploy those services. See [MojoAuth OIDC documentation](https://mojoauth.com/docs/applications/oidc-applications/) and the project's [discovery document](https://ringorden-4e6f326a.auth.mojoauth.com/.well-known/openid-configuration).
+
 ## Storage and existing deployments
 
 Supabase is the selected production database. With `SUPABASE_URL` and `SUPABASE_SERVER_SECRET` configured, the Supabase repository is selected instead of Netlify Postgres. Secrets belong in Netlify's Functions environment settings, never in a Vite-prefixed client variable. Follow [Supabase setup](SUPABASE.md). Existing Netlify Postgres support is retained for rollback; it is not used when Supabase is configured. The `NETLIFY_DB_URL` generated by Netlify is server-only.

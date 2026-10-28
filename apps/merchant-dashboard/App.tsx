@@ -63,11 +63,14 @@ import { Obj, Workspace, money, label, time, api } from "./types";
 import { Configuration, Onboarding } from "./Configuration";
 import MenuImport from "./MenuImport";
 import VoiceCall from "./VoiceCall";
+import CustomerOrderLink from "./CustomerOrderLink";
+import CustomerReceipt from "./CustomerReceipt";
 import { confirmedOrders, inPeriod } from "./reporting";
 import {
   consumeSupabaseMagicLink,
   requestSupabaseMagicLink,
   supabaseAuthConfigured,
+  clearBrowserSignIn,
 } from "./supabase-auth";
 const nav = [
   {
@@ -240,6 +243,8 @@ export default function MerchantApp() {
   const [loginSent, setLoginSent] = useState(false);
   const [loginBusy, setLoginBusy] = useState(false);
   const [loginError, setLoginError] = useState("");
+  const [mojoAuthReady, setMojoAuthReady] = useState(false);
+  const [useEmailSignIn, setUseEmailSignIn] = useState(false);
   const notify = useCallback((s: string) => {
     setToast(s);
     setTimeout(() => setToast(""), 5000);
@@ -257,6 +262,38 @@ export default function MerchantApp() {
     const t = setInterval(load, 8000);
     return () => clearInterval(t);
   }, [load]);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/auth/config", { cache: "no-store", signal: controller.signal })
+      .then(async (response) =>
+        response.ok
+          ? ((await response.json()) as { mojoauth?: { configured?: boolean } })
+          : null,
+      )
+      .then((config) => {
+        if (!controller.signal.aborted)
+          setMojoAuthReady(config?.mojoauth?.configured === true);
+      })
+      .catch(() => {
+        /* Existing Supabase or platform sign-in remains available. */
+      });
+    const url = new URL(window.location.href);
+    const problem = url.searchParams.get("signin_error");
+    if (problem) {
+      setLoginError(
+        problem === "cancelled"
+          ? "Sign-in was cancelled. You can try again."
+          : "We couldn’t complete sign-in. Please try again.",
+      );
+      url.searchParams.delete("signin_error");
+      window.history.replaceState(
+        null,
+        "",
+        url.pathname + url.search + url.hash,
+      );
+    }
+    return () => controller.abort();
+  }, []);
   useEffect(() => {
     const callbackError = consumeSupabaseMagicLink();
     if (callbackError) setLoginError(callbackError);
@@ -314,6 +351,22 @@ export default function MerchantApp() {
       setLoginBusy(false);
     }
   };
+  const signOut = async () => {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "same-origin",
+      });
+      if (!response.ok)
+        throw new Error("We couldn’t sign you out. Please try again.");
+      clearBrowserSignIn();
+      window.location.assign("/");
+    } catch (error) {
+      notify((error as Error).message);
+      setBusy(false);
+    }
+  };
   const exportOrders = () => {
     if (!data) return;
     const rows = [
@@ -355,9 +408,42 @@ export default function MerchantApp() {
     return (
       <div className="loading-page">
         <Logo />
-        {error.toLowerCase().includes("sign in") && supabaseAuthConfigured ? (
+        {error && mojoAuthReady && !useEmailSignIn ? (
+          <>
+            <h2>Welcome to Ring Orden</h2>
+            <p>Sign in securely to open your restaurant workspace.</p>
+            {loginError && (
+              <p role="alert" style={{ color: "#923c4e" }}>
+                {loginError}
+              </p>
+            )}
+            <a className="primary" href="/api/auth/mojo/login">
+              Sign in with MojoAuth <ArrowRight size={16} />
+            </a>
+            {supabaseAuthConfigured && (
+              <button
+                className="text-button"
+                onClick={() => {
+                  setUseEmailSignIn(true);
+                  setLoginError("");
+                }}
+              >
+                Use existing email sign-in
+              </button>
+            )}
+          </>
+        ) : error.toLowerCase().includes("sign in") &&
+          supabaseAuthConfigured ? (
           <>
             <h2>Sign in to Ring Orden</h2>
+            {mojoAuthReady && (
+              <button
+                className="text-button"
+                onClick={() => setUseEmailSignIn(false)}
+              >
+                Use MojoAuth instead
+              </button>
+            )}
             <p>
               {loginSent
                 ? `Check ${loginEmail} for your secure sign-in link.`
@@ -500,6 +586,11 @@ export default function MerchantApp() {
           ))}
         </nav>
         <div className="sidebar-bottom">
+          {data.user.provider === "mojoauth" && (
+            <button className="nav-item" disabled={busy} onClick={signOut}>
+              Sign out of workspace
+            </button>
+          )}
           {data.user.role !== "STAFF" && (
             <div className="help-card">
               <span className="help-icon">
@@ -910,6 +1001,12 @@ export default function MerchantApp() {
           data={data}
           onClose={() => setSelected(null)}
           busy={busy}
+          onCustomerLink={(method) =>
+            action("/orders/" + currentOrder.id + "/customer-link", method, {})
+          }
+          onReceipt={(route, method, body) =>
+            action(`/orders/${currentOrder.id}/${route}`, method, body)
+          }
           onAction={async (a) => {
             const r = await action(
               "/orders/" + currentOrder.id + "/action",
@@ -2328,12 +2425,20 @@ function OrderDetail({
   data,
   onClose,
   onAction,
+  onCustomerLink,
+  onReceipt,
   busy,
 }: {
   order: Obj;
   data: Workspace;
   onClose: () => void;
   onAction: (a: string) => void;
+  onCustomerLink: (method: "POST" | "DELETE") => Promise<Obj | undefined>;
+  onReceipt: (
+    route: "receipt-link" | "receipt-send",
+    method: "POST" | "DELETE",
+    body?: unknown,
+  ) => Promise<Obj | null | undefined>;
   busy: boolean;
 }) {
   const [tab, setTab] = useState("Order");
@@ -2443,6 +2548,37 @@ function OrderDetail({
                 {label(o.pos_status || o.pos_sync_status || "Dashboard only")}
               </span>
             </div>
+            {data.user.role === "OWNER" &&
+              ![
+                "CANCELLED",
+                "REFUND_PENDING",
+                "REFUNDED",
+                "ESCALATED",
+              ].includes(o.status) && (
+                <CustomerOrderLink
+                  key={o.id}
+                  busy={busy}
+                  expiresAt={o.customer_link?.expires_at}
+                  onRequest={onCustomerLink}
+                />
+              )}
+            {data.user.role === "OWNER" &&
+              ![
+                "DRAFT",
+                "AWAITING_CLARIFICATION",
+                "AWAITING_CONFIRMATION",
+                "ESCALATED",
+              ].includes(o.status) && (
+                <CustomerReceipt
+                  key={`receipt-${o.id}`}
+                  orderId={o.id}
+                  busy={busy}
+                  expiresAt={o.receipt_link?.expires_at}
+                  status={o.receipt_notification?.status}
+                  retryAllowed={o.receipt_retry_allowed === true}
+                  onRequest={onReceipt}
+                />
+              )}
           </>
         ) : tab === "Conversation" ? (
           <div className="transcript">
