@@ -23,7 +23,14 @@ type Row = Omit<Draft, "price"> & {
   included: boolean;
   selectionManual: boolean;
 };
-type Extraction = { items: Draft[]; warnings: string[]; currency: string };
+type Extraction = {
+  items: Draft[];
+  warnings: string[];
+  currency: string;
+  id: string;
+  label: string;
+  created_at: string;
+};
 
 async function normalizePhoto(file: File): Promise<Blob> {
   if (!["image/jpeg", "image/png", "image/webp"].includes(file.type))
@@ -100,6 +107,32 @@ export default function MenuPhotoUpload({
       setChecking(false);
     }
   }
+  const [drafts, setDrafts] = useState<Extraction[]>([]);
+  const [draftId, setDraftId] = useState<string>();
+  function resumeDraft(data: Extraction) {
+    const seen = new Set(existingProducts.map((item) => key(item.name)));
+    setRows(
+      data.items.map((item) => {
+        const duplicate = seen.has(key(item.name));
+        seen.add(key(item.name));
+        return {
+          ...item,
+          price: item.price === null ? "" : String(item.price),
+          included: !duplicate && item.price !== null,
+          selectionManual: false,
+        };
+      }),
+    );
+    setDraftId(data.id);
+    setFileName(data.label);
+    setWarnings(data.warnings);
+    setRequestId(crypto.randomUUID());
+    setImportMode("add");
+    setReplaceIds([]);
+    setConfirmReplacement(false);
+    setSuccess(null);
+    setPreview("");
+  }
   const [rows, setRows] = useState<Row[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [error, setError] = useState("");
@@ -121,6 +154,16 @@ export default function MenuPhotoUpload({
   }, [confirmReplacement]);
   useEffect(() => {
     let active = true;
+    api<{ drafts: Extraction[] }>("/menu/image/drafts")
+      .then((result) => {
+        if (active) setDrafts(result.drafts);
+      })
+      .catch(() => {
+        if (active)
+          setError(
+            "Saved menu drafts could not be loaded. Refresh to try again.",
+          );
+      });
     api<{ configured: boolean }>("/menu/image/status")
       .then((result) => {
         if (active) setConfigured(result.configured);
@@ -267,7 +310,7 @@ export default function MenuPhotoUpload({
       setPreview(URL.createObjectURL(file));
       setFileName(file.name);
       const form = new FormData();
-      form.set("file", blob, "menu-photo.jpg");
+      form.set("file", blob, file.name);
       const token = await supabaseAccessToken();
       const response = await fetch("/api/menu/image/preview", {
         method: "POST",
@@ -285,21 +328,11 @@ export default function MenuPhotoUpload({
           result.error || "This menu could not be read. Try a clearer photo.",
         );
       const data = result as Extraction;
-      const seen = new Set(existingProducts.map((item) => key(item.name)));
-      setRows(
-        data.items.map((item) => {
-          const duplicate = seen.has(key(item.name));
-          seen.add(key(item.name));
-          return {
-            ...item,
-            price: item.price === null ? "" : String(item.price),
-            included: !duplicate && item.price !== null,
-            selectionManual: false,
-          };
-        }),
-      );
-      setWarnings(data.warnings);
-      setRequestId(crypto.randomUUID());
+      resumeDraft(data);
+      setDrafts((prior) => [
+        data,
+        ...prior.filter((draft) => draft.id !== data.id),
+      ]);
     } catch (e) {
       if (!controller.signal.aborted)
         setError(
@@ -322,6 +355,7 @@ export default function MenuPhotoUpload({
       const result = await api<{ count: number }>("/menu/import", "POST", {
         request_id: requestId,
         source: "photo",
+        draft_id: draftId,
         label: fileName.slice(0, 180),
         replace_import_ids: replaceIds,
         items: selected.map((row) => ({
@@ -336,6 +370,8 @@ export default function MenuPhotoUpload({
       setWarnings([]);
       setPreview("");
       setSuccess(result.count);
+      setDrafts((prior) => prior.filter((draft) => draft.id !== draftId));
+      setDraftId(undefined);
       setConfirmReplacement(false);
       setImportMode("add");
       setReplaceIds([]);
@@ -376,6 +412,35 @@ export default function MenuPhotoUpload({
           </button>
         </div>
       </div>
+      {drafts.length > 0 && (
+        <div className="info-banner">
+          <label>
+            Saved menu drafts
+            <select
+              aria-label="Resume a saved menu draft"
+              value={draftId ?? ""}
+              disabled={!!busy}
+              onChange={(event) => {
+                const draft = drafts.find(
+                  (entry) => entry.id === event.target.value,
+                );
+                if (draft) resumeDraft(draft);
+              }}
+            >
+              <option value="">Choose a draft to review</option>
+              {drafts.map((draft) => (
+                <option key={draft.id} value={draft.id}>
+                  {draft.label} · {new Date(draft.created_at).toLocaleString()}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p>
+            Extracted results are saved. Resume them here after returning to
+            this page.
+          </p>
+        </div>
+      )}
       <input
         ref={fileInput}
         type="file"

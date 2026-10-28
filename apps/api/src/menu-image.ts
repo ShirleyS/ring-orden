@@ -154,7 +154,10 @@ async function readUpload(request: Request) {
     throw new HttpError(400, "Choose one menu photo.");
   if (files[0].size > MAX_MENU_IMAGE_BYTES)
     throw new HttpError(413, "Choose a smaller menu photo.");
-  return new Uint8Array(await files[0].arrayBuffer());
+  return {
+    bytes: new Uint8Array(await files[0].arrayBuffer()),
+    label: files[0].name.slice(0, 180),
+  };
 }
 export async function extractMenuPhoto(
   request: Request,
@@ -166,7 +169,7 @@ export async function extractMenuPhoto(
       503,
       "Menu photo reading is not connected yet. Finish Firecrawl setup in your hosting settings.",
     );
-  const bytes = await readUpload(request);
+  const { bytes, label } = await readUpload(request);
   const jpeg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
   const png = [137, 80, 78, 71, 13, 10, 26, 10].every(
     (value, index) => bytes[index] === value,
@@ -292,5 +295,5 @@ export async function extractMenuPhoto(
       502,
       "The menu could not be read. Try a clearer photo.",
     );
-  return normalizeMenuPhoto(result.data?.json, currency);
+  return { ...normalizeMenuPhoto(result.data?.json, currency), label };
 }

@@ -20,13 +20,14 @@ export interface BrowserPhoneFrameProps {
   error: string;
   stage: string;
   muted: boolean;
+  messages?: import("../../packages/ring-orden-connect/src/call-receipt").CallReceiptMessage[];
   onStart: () => void;
   onStop: () => void;
   onMute: (muted: boolean) => boolean;
   onVolume: (volume: number) => void;
   onMessage: (text: string) => boolean;
 }
-const DEFAULT_ORIGIN = "https://preview--browser-bell-companion.lovable.app";
+const defaultOrigin = () => window.location.origin;
 
 export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
   const [instance] = useState(() =>
@@ -42,15 +43,15 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
     ).env;
     try {
       const configured = new URL(
-        env?.VITE_BROWSER_PHONE_ORIGIN || DEFAULT_ORIGIN,
+        env?.VITE_BROWSER_PHONE_ORIGIN || defaultOrigin(),
       );
       return configured.protocol === "https:" ||
         (configured.protocol === "http:" &&
           ["localhost", "127.0.0.1"].includes(configured.hostname))
         ? configured.origin
-        : DEFAULT_ORIGIN;
+        : defaultOrigin();
     } catch {
-      return DEFAULT_ORIGIN;
+      return defaultOrigin();
     }
   });
   const url = browserPhoneUrl(origin, window.location.origin, instance);
@@ -103,6 +104,10 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
       peer,
     );
   };
+  const sendMessages = () => {
+    for (const message of current.current.messages ?? [])
+      send("message.received", message);
+  };
   const waitForReady = () => {
     clearTimeout(handshakeTimer.current);
     handshakeTimer.current = setTimeout(
@@ -127,6 +132,7 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
           setBridge("Caller phone connected");
           configure();
           sendState();
+          sendMessages();
           break;
         case "call.request":
           current.current.onStart();
@@ -172,6 +178,7 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
           );
           configure(frame.current?.contentWindow);
           sendState(frame.current?.contentWindow);
+          sendMessages();
           if (!iframeReady.current) waitForReady();
         },
       );
@@ -189,6 +196,9 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
   useEffect(() => {
     if (ready) sendState();
   }, [props.phase, props.error, props.muted, ready]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (ready) sendMessages();
+  }, [props.messages, ready]); // eslint-disable-line react-hooks/exhaustive-deps
   const openPhone = () => {
     const opened = window.open(
       url,

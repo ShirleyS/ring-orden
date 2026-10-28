@@ -1,3 +1,4 @@
+import { prepareWidgetReceipt } from "./widget-receipt.ts";
 import { z } from "zod";
 import {
   listMenuImports,
@@ -157,8 +158,11 @@ function summary(order: Order) {
 }
 
 function metadata(state: TenantState, order: Order) {
-  const { billing: _billing, ...safeMetadata } =
-    state.order_metadata[order.id] ?? {};
+  const {
+    billing: _billing,
+    widget_receipt: _widgetReceipt,
+    ...safeMetadata
+  } = state.order_metadata[order.id] ?? {};
   return {
     ...order,
     ...safeMetadata,
@@ -1448,6 +1452,15 @@ export async function handleRequest(
           );
         return json(result);
       }
+      if (path[0] === "menu" && path[1] === "image" && path[2] === "drafts") {
+        if (role !== "OWNER")
+          throw new HttpError(403, "Only the owner can review menu drafts.");
+        return json({
+          drafts: (state.menu_drafts ?? []).filter(
+            (draft) => draft.status === "pending",
+          ),
+        });
+      }
       if (path[0] === "menu" && path[1] === "image" && path[2] === "status") {
         if (role !== "OWNER")
           throw new HttpError(403, "Only the owner can import products.");
@@ -1550,16 +1563,64 @@ export async function handleRequest(
     ) {
       if (trustedTool || role !== "OWNER")
         throw new HttpError(403, "Only the owner can import products.");
-      return json(
-        await extractMenuPhoto(
-          request,
-          env.FIRECRAWL_API_KEY ?? "",
-          state.merchant.currency || "MXN",
-        ),
+      const extraction = await extractMenuPhoto(
+        request,
+        env.FIRECRAWL_API_KEY ?? "",
+        state.merchant.currency || "MXN",
+      );
+      const draft = {
+        ...extraction,
+        id: uid("draft"),
+        label: extraction.label,
+        created_at: new Date().toISOString(),
+        status: "pending" as const,
+      };
+      // OCR can take a minute. Reload before saving so concurrent orders are preserved.
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const latest = await repo.load(merchantId, identity.id);
+        if (!latest) throw new HttpError(404, "Workspace not found.");
+        if (latest.state.merchant.currency !== state.merchant.currency)
+          throw new HttpError(
+            409,
+            "Workspace currency changed. Read this photo again.",
+          );
+        (latest.state.menu_drafts ??= []).unshift(draft);
+        if (
+          await repo.save(
+            merchantId,
+            identity.id,
+            latest.revision,
+            latest.state,
+          )
+        )
+          return json(draft);
+      }
+      throw new HttpError(
+        409,
+        "The extracted menu could not be saved because another update arrived. Please try again.",
       );
     }
     const body = await bodyOf(request);
     if (!trustedTool) guardMerchantRoute(role, path, method, body);
+    if (
+      path.length === 2 &&
+      path[0] === "voice" &&
+      path[1] === "receipt" &&
+      method === "POST"
+    ) {
+      if (trustedTool || role !== "OWNER")
+        throw new HttpError(
+          403,
+          "Only the owner can deliver test-phone receipts.",
+        );
+      const receipt = await prepareWidgetReceipt(state, body, env);
+      if (
+        receipt.status === "READY" &&
+        !(await repo.save(merchantId, identity.id, stored.revision, state))
+      )
+        throw new HttpError(409, "The order changed. Retry receipt delivery.");
+      return json(receipt);
+    }
     let result: unknown;
     let status = 200;
     const requestId =
@@ -1569,7 +1630,8 @@ export async function handleRequest(
     const issuesCustomerLink =
       path[0] === "customers" ||
       (method === "POST" &&
-        ((path[0] === "orders" && ["customer-link", "receipt-link"].includes(path[2])) ||
+        ((path[0] === "orders" &&
+          ["customer-link", "receipt-link"].includes(path[2])) ||
           (path[0] === "tools" && path[1] === "customer_link")));
     const requestKey =
       requestId && !issuesCustomerLink
@@ -1682,38 +1744,43 @@ export async function handleRequest(
         );
       const order = findOrder(state, path[1]);
       if (path[2] === "receipt-link") {
-      result =
-        method === "DELETE"
-          ? path[2] === "receipt-link"
-            ? revokeCustomerReceiptLink(state, order.id)
-            : revokeCustomerOrderLink(state, order.id)
-          : await (path[2] === "receipt-link"
-              ? issueCustomerReceiptLink(state, order, env)
-              : issueCustomerOrderLink(state, order, env));
+        result =
+          method === "DELETE"
+            ? path[2] === "receipt-link"
+              ? revokeCustomerReceiptLink(state, order.id)
+              : revokeCustomerOrderLink(state, order.id)
+            : await (path[2] === "receipt-link"
+                ? issueCustomerReceiptLink(state, order, env)
+                : issueCustomerOrderLink(state, order, env));
       } else {
-      const purpose = z
-        .enum(["order", "recovery", "receipt", "billing"])
-        .parse(body.purpose ?? "order");
-      if (method === "DELETE")
-        result =
-          purpose === "receipt" || purpose === "billing"
-            ? revokeCustomerCapabilityLink(state, order.id, purpose)
-            : revokeCustomerOrderLink(state, order.id);
-      else if (purpose === "receipt" || purpose === "billing") {
-        if (
-          purpose === "receipt" &&
-          (order.status !== "COMPLETED" || order.payment_status !== "PAID")
-        )
-          throw new HttpError(
-            409,
-            "A receipt link is available after the paid order is completed.",
+        const purpose = z
+          .enum(["order", "recovery", "receipt", "billing"])
+          .parse(body.purpose ?? "order");
+        if (method === "DELETE")
+          result =
+            purpose === "receipt" || purpose === "billing"
+              ? revokeCustomerCapabilityLink(state, order.id, purpose)
+              : revokeCustomerOrderLink(state, order.id);
+        else if (purpose === "receipt" || purpose === "billing") {
+          if (
+            purpose === "receipt" &&
+            (order.status !== "COMPLETED" || order.payment_status !== "PAID")
+          )
+            throw new HttpError(
+              409,
+              "A receipt link is available after the paid order is completed.",
+            );
+          result = await issueCustomerCapabilityLink(
+            state,
+            order,
+            purpose,
+            env,
           );
-        result = await issueCustomerCapabilityLink(state, order, purpose, env);
-      } else
-        result =
-          purpose === "recovery"
-            ? await issueRecoveryLink(state, order, env)
-            : await issueCustomerOrderLink(state, order, env);
+        } else
+          result =
+            purpose === "recovery"
+              ? await issueRecoveryLink(state, order, env)
+              : await issueCustomerOrderLink(state, order, env);
       }
       status = method === "POST" ? 201 : 200;
       audit(
@@ -1909,12 +1976,7 @@ export async function handleRequest(
             state.catalog,
             rules(state),
           );
-          order = await afterConfirmation(
-            state,
-            order,
-            undefined,
-            env,
-          );
+          order = await afterConfirmation(state, order, undefined, env);
         } else if (
           ["CANCELLED", "REFUNDED", "REFUND_PENDING"].includes(order.status)
         )
@@ -1998,6 +2060,7 @@ export async function handleRequest(
         .object({
           items: z.array(ReviewedMenuItemSchema).min(1).max(100),
           request_id: z.string().uuid().optional(),
+          draft_id: z.string().min(1).max(160).optional(),
           source: z.enum(["photo", "csv"]).default("photo"),
           label: z.string().trim().min(1).max(180).optional(),
           replace_import_ids: z
@@ -2007,6 +2070,14 @@ export async function handleRequest(
         })
         .strict()
         .parse(body);
+      const draft = batch.draft_id
+        ? state.menu_drafts?.find((d) => d.id === batch.draft_id)
+        : undefined;
+      if (batch.draft_id && (!draft || draft.status !== "pending"))
+        throw new HttpError(
+          409,
+          "This menu draft is no longer pending. Refresh the menu.",
+        );
       const added = batch.items.map((item) =>
         CatalogItemSchema.parse({ ...item, id: uid("item"), modifiers: [] }),
       );
@@ -2023,6 +2094,10 @@ export async function handleRequest(
           : "Menu products added",
         `${added.length} reviewed products added from ${imported.label}.`,
       );
+      if (draft) {
+        draft.status = "imported";
+        draft.imported_at = new Date().toISOString();
+      }
       result = { items: added, count: added.length, import: imported };
       status = 201;
     } else if (

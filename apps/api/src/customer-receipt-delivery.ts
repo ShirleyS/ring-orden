@@ -60,6 +60,12 @@ export async function sendPendingCustomerReceipt(
     ].includes(order.status)
   )
     throw new HttpError(409, "Confirm the order before sending a receipt.");
+  // The connected test phone owns this receipt; a delayed demo/provider path must not rotate its grant.
+  if (
+    meta.widget_receipt &&
+    meta.widget_receipt.hash === meta.receipt_link?.hash
+  )
+    return { status: "STUB_PHONE" };
   const previous = meta.receipt_notification;
   if (previous && !explicitRetry) return { status: previous.status };
   if (!receiptRetryAllowed(previous))

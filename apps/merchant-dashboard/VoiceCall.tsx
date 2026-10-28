@@ -6,6 +6,12 @@ import { api } from "./types";
 import { BrowserPhoneFrame } from "./BrowserPhoneFrame";
 import { withDeadline } from "../../packages/ring-orden-connect/src/browser-phone";
 
+import { waitForCallReceipt } from "../../packages/ring-orden-connect/src/call-receipt";
+import type {
+  CallReceiptMessage,
+  CallReceiptResult,
+} from "../../packages/ring-orden-connect/src/call-receipt";
+
 type Phase =
   | "idle"
   | "connecting"
@@ -28,6 +34,13 @@ export interface VoiceCallProps {
 
 /** Real ElevenLabs audio session. No microphone request occurs until Start call is clicked. */
 export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
+  const [receiptState, setReceiptState] = useState("");
+  const [receiptAttempt, setReceiptAttempt] = useState(0);
+  const [receiptMessages, setReceiptMessages] = useState<CallReceiptMessage[]>(
+    [],
+  );
+  const receiptRequests = useRef(new Set<string>());
+  const receiptAbort = useRef(new AbortController());
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState("");
   const [muted, setMuted] = useState(false);
@@ -79,18 +92,31 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
   }, [refresh, releasePermissionStream]);
   const close = useCallback(() => {
     void stop();
+    if (
+      session.current ||
+      starting.current ||
+      phase === "listening" ||
+      phase === "speaking" ||
+      phase === "connecting"
+    )
+      return;
+    if (receiptState === "Preparing your receipt…") return;
     callbacks.current.onClose();
-  }, [stop]);
+  }, [stop, phase, receiptState]);
+  const closeRef = useRef(close);
+  closeRef.current = close;
   useEffect(() => {
+    receiptAbort.current = new AbortController();
     mounted.current = true;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
+      if (event.key === "Escape") closeRef.current();
     };
     document.addEventListener("keydown", escape);
     return () => {
       mounted.current = false;
+      receiptAbort.current.abort();
       // This generation counter invalidates asynchronous work during cleanup.
       // eslint-disable-next-line react-hooks/exhaustive-deps
       generation.current++;
@@ -104,7 +130,55 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
       document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", escape);
     };
-  }, [close, releasePermissionStream]);
+  }, [releasePermissionStream]);
+
+  useEffect(() => {
+    if (
+      !conversationId ||
+      !["ended", "error"].includes(phase) ||
+      receiptRequests.current.has(conversationId)
+    )
+      return;
+    receiptRequests.current.add(conversationId);
+    const signal = receiptAbort.current.signal;
+    setReceiptState("Preparing your receipt…");
+    void waitForCallReceipt(
+      conversationId,
+      (id, requestSignal) =>
+        api<CallReceiptResult>(
+          "/voice/receipt",
+          "POST",
+          { conversation_id: id },
+          requestSignal,
+        ),
+      { signal },
+    )
+      .then((result) => {
+        if (signal.aborted) return;
+        if (result.status === "READY") {
+          setReceiptMessages((messages) =>
+            messages.some((m) => m.id === result.message.id)
+              ? messages
+              : [...messages, result.message],
+          );
+          setReceiptState(
+            "Your receipt is ready. Open it below or in the connected WhatsApp test phone.",
+          );
+        } else
+          setReceiptState(
+            result.status === "UNCONFIRMED"
+              ? "This call has no confirmed order. No receipt was sent."
+              : "The call’s order has not arrived yet. Close and check Orders, or retry receipt delivery.",
+          );
+      })
+      .catch((cause) => {
+        if (!signal.aborted)
+          setReceiptState(
+            "Receipt delivery needs attention: " +
+              (cause instanceof Error ? cause.message : "Please retry."),
+          );
+      });
+  }, [phase, conversationId, receiptAttempt]);
 
   const start = async () => {
     if (starting.current || session.current) return;
@@ -398,6 +472,7 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
           style={{ display: "grid", gap: 20, padding: 24 }}
         >
           <BrowserPhoneFrame
+            messages={receiptMessages}
             phase={phase}
             error={error}
             stage={stage}
@@ -448,6 +523,35 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
           >
             {status}
           </p>
+          {receiptState && (
+            <div className="info-banner" role="status">
+              <p>{receiptState}</p>
+              {receiptState !== "Preparing your receipt…" &&
+                !receiptState.startsWith("Your receipt") && (
+                  <button
+                    className="secondary"
+                    onClick={() => {
+                      receiptRequests.current.delete(conversationId);
+                      setReceiptState("");
+                      setReceiptAttempt((attempt) => attempt + 1);
+                    }}
+                  >
+                    Retry receipt
+                  </button>
+                )}
+            </div>
+          )}
+          {receiptMessages.map((message) => (
+            <p key={message.id}>
+              <a
+                href={message.link.url}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {message.link.label}
+              </a>
+            </p>
+          ))}
           {error && (
             <div
               className="info-banner"
@@ -505,7 +609,11 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
                 {connecting ? "Cancel" : "End call"}
               </button>
             ) : (
-              <button className="primary" onClick={() => void start()}>
+              <button
+                className="primary"
+                disabled={receiptState === "Preparing your receipt…"}
+                onClick={() => void start()}
+              >
                 <Phone size={16} />
                 {phase === "idle" ? "Start call" : "Call again"}
               </button>

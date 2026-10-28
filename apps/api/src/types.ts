@@ -42,6 +42,7 @@ export interface AuditEvent {
   data?: unknown;
 }
 export interface OrderMetadata {
+  widget_receipt?: import("./widget-receipt.ts").StoredWidgetReceipt;
   customer_link?: { hash: string; expires_at: string };
   receipt_link?: { hash: string; expires_at: string };
   billing?: BillingSubmission;
@@ -83,6 +84,15 @@ export interface MenuImportBatch {
   items: CatalogItem[];
 }
 export interface TenantState {
+  menu_drafts?: (Awaited<
+    ReturnType<typeof import("./menu-image.ts").extractMenuPhoto>
+  > & {
+    id: string;
+    label: string;
+    created_at: string;
+    status: "pending" | "imported";
+    imported_at?: string;
+  })[];
   menu_imports?: MenuImportBatch[];
   followup_consents?: Record<
     string,

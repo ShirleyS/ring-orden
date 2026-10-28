@@ -704,3 +704,33 @@ test("cutover markers have RLS and no browser table privileges", async () => {
 test.after(async () => {
   await database.close();
 });
+
+test("menu extraction drafts round-trip through the actual Supabase SQL functions", async () => {
+  const merchant = "menu-draft-sql",
+    owner = "menu-draft-owner";
+  await create(merchant, owner);
+  const row = (await load(merchant, owner))!;
+  row.state.menu_drafts = [
+    {
+      id: "draft-sql",
+      label: "menu.png",
+      status: "pending",
+      created_at: new Date().toISOString(),
+      currency: "MXN",
+      warnings: ["Review prices"],
+      items: [
+        {
+          name: "Draft Latte",
+          price: null,
+          category: "Coffee",
+          description: "Check price",
+          available: true,
+        },
+      ],
+    },
+  ];
+  assert.equal(await save(merchant, owner, row.revision, row.state), true);
+  const restored = (await load(merchant, owner))!;
+  assert.deepEqual(restored.state.menu_drafts, row.state.menu_drafts);
+  assert.equal(await load(merchant, "foreign-owner"), null);
+});
