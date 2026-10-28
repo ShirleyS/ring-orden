@@ -15,6 +15,6 @@
 ## Still pending
 
 - The tested connection is an API test connection. Browser-local state is not injected or changed by that test; a user-facing widget must register/pair its own connection.
-- The n8n receiver deliberately rejects business events unless its signing secret and exact phone origin are configured. The successful pairing bootstrap test is not authenticated message delivery.
+- The Cloud-compatible receiver is published with the exact public phone origin and `$vars.BP_SIGNING_SECRET`. Its code passed three standalone checks: valid signed reply, absent key rejection, wrong key rejection. Source is `packages/browser-phone-relay/examples/n8n-receiver.json`. The project variable form is prepared, with value blank for user entry. Business events deliberately remain fail-closed until the key is saved. The successful pairing bootstrap test is not authenticated message delivery.
 - Receipt/RFC/recovery notifications have not been demonstrated arriving in a paired widget session. Existing follow-up workflow I still needs its widget delivery destination and successful acknowledgment path verified.
 - No real WhatsApp messages, payment charges, or issued CFDIs were part of these tests. No database migration or managed Supabase credential extraction was required for the relay.
