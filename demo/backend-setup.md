@@ -1,6 +1,6 @@
 # Backend configuration
 
-The default private demo uses persistent D1. Set both `SUPABASE_URL` and `SUPABASE_SERVER_SECRET` after applying the two Supabase migrations to select the implemented Supabase/PostgREST repository. Bootstrap and health report the active storage provider. Both repositories enforce persistent authenticated merchant memberships, OWNER/MANAGER/STAFF route permissions, single-use email-bound team invitations and optimistic compare-and-swap writes.
+Supabase is the selected production database; local development can retain persistent D1. Set both `SUPABASE_URL` and `SUPABASE_SERVER_SECRET` after applying all Supabase migrations to select the Supabase/PostgREST repository. See [deployment and guarded D1 import](../docs/SUPABASE.md). Bootstrap and health report the active storage provider. Both repositories enforce persistent authenticated merchant memberships, OWNER/MANAGER/STAFF route permissions, single-use email-bound team invitations and optimistic compare-and-swap writes.
 
 ## Local run
 

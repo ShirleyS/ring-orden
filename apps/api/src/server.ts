@@ -41,6 +41,7 @@ import {
 } from "./auth.ts";
 import type { RuntimeEnv, Identity } from "./auth.ts";
 import { repositoryFor, storageStatus } from "./storage.ts";
+import { prepareSupabaseMigration } from "./supabase-migration.ts";
 import {
   guardMerchantRoute,
   redactWorkspace,
@@ -1090,6 +1091,7 @@ export async function handleRequest(
         status: 204,
         headers: { Allow: "GET, POST, PATCH, DELETE, OPTIONS" },
       });
+    if (!repository) await prepareSupabaseMigration(env);
     const repo = repository ?? repositoryFor(env);
     if (path[0] === "webhooks" && path[1] === "stripe")
       return await stripeWebhook(request, env, repo);

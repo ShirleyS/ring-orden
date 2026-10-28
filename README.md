@@ -36,8 +36,8 @@ Tests exercise deterministic transaction logic, tenant boundaries, memory isolat
 | Area | Running implementation | Setup or boundary |
 | --- | --- | --- |
 | Merchant UI | React on Vinext, responsive merchant workspace | Source can be adapted to Lovable. The Lovable hosted authoring service was not used to create this checkout. |
-| Demo persistence | Cloudflare D1, tenant-scoped state, memberships and revision checks | The private hosted Site uses D1. Local and hosted databases are separate. |
-| Supabase | Optional running Postgres repository through scoped, server-only RPCs; normalized RLS schema also included | Apply both migrations, then configure SUPABASE_URL and SUPABASE_SERVER_SECRET together to select it. The private demo defaults to D1; no actual Supabase project has been verified. |
+| Local demo persistence | Cloudflare D1, tenant-scoped state, memberships and revision checks | Local D1 remains available for credential-free development. Local and hosted databases are separate. |
+| Production database | Supabase Postgres through scoped, server-only RPCs; normalized RLS schema also included | Apply all migrations, then configure SUPABASE_URL and SUPABASE_SERVER_SECRET together. A one-time importer preserves the existing private Site's D1 workspace. See [Supabase setup](docs/SUPABASE.md) for activation and verification. |
 | Merchant identity | Private Sites identity; loopback demo identity | MojoAuth token-verification/session boundary is provided. Configure the actual application and passwordless frontend flow. |
 | Intelligence | Deterministic demonstration interpreter | Configure credentials to run actual model interpretation and compatibility tests. |
 | Voice | Browser audio session through the ElevenLabs SDK, signed URLs and backend agent tools | Configure agent credentials and tools. Phone routing is separate. The real microphone/provider session has not been tested with credentials. |
@@ -59,7 +59,7 @@ packages/openmodel-gateway/ Model adapters, demo interpreter and compatibility
 packages/ring-orden-connect/ POS interface, Square and custom webhooks
 db/                         Running D1/Drizzle schema
 drizzle/                    Committed D1 migrations
-database/supabase/           Normalized RLS schema and optional runtime RPC repository
+database/supabase/           Supabase RLS schema, runtime RPCs and cutover migrations
 prompts/                    Transaction/voice prompts and tool contracts
 n8n/                        Importable orchestration workflows
 demo/DEMO.md                Reproducible demo script and expected results
@@ -81,17 +81,17 @@ Begin with the credential-free demo. Configure one provider at a time, run its t
 | Custom webhook | Provide an HTTPS canonical-order receiver that deduplicates the supplied key | POS endpoint and signing secret; receiver verifies timestamp and signature |
 | MojoAuth | Configure actual issuer, audience and signing keys; connect passwordless sign-in | MOJOAUTH_JWKS_URL, MOJOAUTH_ISSUER, MOJOAUTH_AUDIENCE, SESSION_SECRET of at least 32 random characters |
 | n8n | Import workflows; configure app origin/tool secret and provider credentials; activate | N8N_WEBHOOK_URL, N8N_WEBHOOK_SECRET, workflow-specific configuration |
-| Supabase | Create project; apply both SQL migrations in order; keep the server key private | SUPABASE_URL and SUPABASE_SERVER_SECRET together select the supplied runtime repository; removing both selects D1 |
+| Supabase | Apply all SQL migrations in order; keep the server key private | SUPABASE_URL and SUPABASE_SERVER_SECRET select Supabase; SUPABASE_MIGRATE_D1=true performs the guarded one-time private Site import |
 
 Ordering phone and notification phone are separate fields. Saving a phone string does not purchase, port or activate a number. Ring Orden does not provision paid services automatically.
 
 Stripe marks PAID only after a valid, timely signature, a matching saved Checkout Session, matching merchant/order metadata, matching amount/currency and payment_status=paid. A success-page redirect does not mark an order paid. Demo-payment actions are limited to demo orders and logged as simulation.
 
-## Optional Supabase runtime
+## Supabase runtime
 
-Apply [the normalized schema](database/supabase/migrations/20261027225425_ring_orden.sql), then [the append-only runtime migration](database/supabase/migrations/20261027230839_ring_orden_runtime.sql) to your Supabase project in that order. Set SUPABASE_URL and SUPABASE_SERVER_SECRET together in the server environment and restart or redeploy. Supplying only one fails closed. Use a server secret or service-role key; never return it to the browser. SUPABASE_PUBLISHABLE_KEY is available for future direct-client features and is not used by this repository.
+Apply [the normalized schema](database/supabase/migrations/20261027225425_ring_orden.sql), [the runtime migration](database/supabase/migrations/20261027230839_ring_orden_runtime.sql), and [the cutover migration](database/supabase/migrations/20261028000753_ring_orden_cutover.sql), in that order. Set SUPABASE_URL and SUPABASE_SERVER_SECRET together in the server environment and restart or redeploy. Supplying only one fails closed. Use a server secret or service-role key; never return it to the browser. SUPABASE_PUBLISHABLE_KEY is available for future direct-client features and is not used by this repository. See [Supabase deployment and data preservation](docs/SUPABASE.md).
 
-The normalized schema supplies merchant-scoped tables and RLS. The current SupabaseRepository persists the working application's tenant state as JSON in the private ring_private.app_state table, with revision checks, separate invitation/event tables and scoped RPCs. Browser anonymous/authenticated roles cannot execute those runtime functions. Verified identity, role checks and service-only RPC calls remain on the backend. The live application does not populate every normalized order/menu/memory table; moving those records into normalized tables is a separate storage refactor. JSON-state persistence keeps parity with D1 and is suitable for the MVP, with whole-tenant contention and growth tradeoffs. No credentialed Supabase deployment or realtime subscription has been verified.
+The normalized schema supplies merchant-scoped tables and RLS. The current SupabaseRepository persists the working application's tenant state as JSON in the private ring_private.app_state table, with revision checks, separate invitation/event tables and scoped RPCs. Browser anonymous/authenticated roles cannot execute those runtime functions. Verified identity, role checks and service-only RPC calls remain on the backend. The live application does not populate every normalized order/menu/memory table; moving those records into normalized tables is a separate storage refactor. JSON-state persistence keeps parity with D1, with whole-tenant contention and growth tradeoffs. Database migrations and SQL access controls are verified separately from deployed runtime credential activation. No realtime subscription is implemented.
 
 ## Team, hours and delivery
 
@@ -138,7 +138,7 @@ See [the demo guide](demo/DEMO.md) and [open-source boundaries](docs/OPEN_SOURCE
 
 ## Netlify deployment
 
-See [Netlify deployment](docs/NETLIFY.md) for the dedicated build, verified private-project identity and managed Postgres setup. The original Sites build remains supported.
+See [Netlify deployment](docs/NETLIFY.md) for the dedicated build and verified private-project identity, and [Supabase](docs/SUPABASE.md) for the production database. The original Sites build remains supported.
 
 ## License and publication
 
