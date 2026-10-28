@@ -64,6 +64,7 @@ export async function createCheckout(
   order: Order,
   origin: string,
   env: RuntimeEnv,
+  returnUrls?: { success: string; cancel: string },
 ): Promise<{ id: string; url: string }> {
   if (
     !env.STRIPE_SECRET_KEY?.startsWith("sk_test_") &&
@@ -75,8 +76,12 @@ export async function createCheckout(
     );
   const data = new URLSearchParams({
     mode: "payment",
-    success_url: `${origin}/?payment=success&order=${encodeURIComponent(order.id)}`,
-    cancel_url: `${origin}/?payment=cancelled&order=${encodeURIComponent(order.id)}`,
+    success_url:
+      returnUrls?.success ??
+      `${origin}/?payment=success&order=${encodeURIComponent(order.id)}`,
+    cancel_url:
+      returnUrls?.cancel ??
+      `${origin}/?payment=cancelled&order=${encodeURIComponent(order.id)}`,
     client_reference_id: order.id,
     "metadata[merchant_id]": order.merchant_id,
     "metadata[order_id]": order.id,

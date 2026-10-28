@@ -59,7 +59,10 @@ export async function retryDuePOS(
       if (!latest) break;
       const latestMeta = latest.state.order_metadata[id];
       if (latestMeta.pos_retry_claim !== claim) break;
-      latest.state.order_metadata[id] = meta;
+      latest.state.order_metadata[id] = {
+        ...meta,
+        customer_link: latestMeta.customer_link,
+      };
       const latestOrder = latest.state.orders.find((o) => o.id === id)!;
       if (latestOrder.revision === order.revision)
         latest.state.orders[latest.state.orders.findIndex((o) => o.id === id)] =

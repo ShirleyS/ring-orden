@@ -38,6 +38,7 @@ export interface AuditEvent {
   data?: unknown;
 }
 export interface OrderMetadata {
+  customer_link?: { hash: string; expires_at: string };
   pos_status: string;
   notification_status: string;
   checkout_id?: string;

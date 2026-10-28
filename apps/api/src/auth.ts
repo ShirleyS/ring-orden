@@ -24,6 +24,7 @@ export interface RuntimeEnv {
   N8N_WEBHOOK_URL?: string;
   N8N_WEBHOOK_SECRET?: string;
   APP_ORIGIN?: string;
+  CUSTOMER_APP_ORIGIN?: string;
   SUPABASE_URL?: string;
   SUPABASE_PUBLISHABLE_KEY?: string;
   SUPABASE_SERVER_SECRET?: string;

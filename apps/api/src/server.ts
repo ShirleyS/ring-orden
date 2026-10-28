@@ -51,6 +51,11 @@ import { seedTenant } from "./seed.ts";
 import { SettingsSchemas, orderingIsOpen } from "./settings.ts";
 import { retryDuePOS } from "./pos-retry.ts";
 import {
+  handleCustomerOrderRequest,
+  issueCustomerOrderLink,
+  revokeCustomerOrderLink,
+} from "./customer-orders.ts";
+import {
   createCheckout,
   expireCheckout,
   sendWhatsApp,
@@ -540,6 +545,7 @@ async function deliverPendingOrder(
   orderId: string,
   env: RuntimeEnv,
   origin: string,
+  returnUrls?: { success: string; cancel: string },
 ): Promise<Order | undefined> {
   const loaded = await repo.loadByMerchant(merchantId);
   if (!loaded) return;
@@ -553,7 +559,7 @@ async function deliverPendingOrder(
     order = await syncOrder(state, order, env);
     if (env.STRIPE_SECRET_KEY) {
       try {
-        const checkout = await createCheckout(order, origin, env);
+        const checkout = await createCheckout(order, origin, env, returnUrls);
         meta.checkout_id = checkout.id;
         meta.checkout_url = checkout.url;
         if (order.status === "CONFIRMED")
@@ -624,6 +630,8 @@ async function deliverPendingOrder(
     latest.state.order_metadata[orderId] = {
       ...latest.state.order_metadata[orderId],
       ...meta,
+      // A provider snapshot must never restore a revoked or replaced capability.
+      customer_link: latest.state.order_metadata[orderId]?.customer_link,
     };
     if (
       latestOrder.revision ===
@@ -1086,6 +1094,20 @@ export async function handleRequest(
       .split("/")
       .filter(Boolean);
     const method = request.method;
+    if (path[0] === "customer") {
+      const repo = repository ?? repositoryFor(env);
+      return handleCustomerOrderRequest(request, env, repo, {
+        rules,
+        orderingAllowed,
+        confirm: (state, order, environment, origin) => {
+          const session = state.sessions.find((s) => s.order_id === order.id);
+          // Visual edits may differ from voice interpretation; do not learn unverified corrections.
+          if (session) session.pending_corrections = [];
+          return afterConfirmation(state, order, session, environment, origin);
+        },
+        deliver: deliverPendingOrder,
+      });
+    }
     if (method === "OPTIONS")
       return new Response(null, {
         status: 204,
@@ -1309,9 +1331,15 @@ export async function handleRequest(
     const requestId =
       request.headers.get("Idempotency-Key") ??
       (typeof body.request_id === "string" ? body.request_id : undefined);
-    const requestKey = requestId
-      ? `${identity.id}:${method}:${url.pathname}:${requestId}`
-      : undefined;
+    // A capability URL is returned only once; never retain it in the response cache.
+    const issuesCustomerLink =
+      method === "POST" &&
+      ((path[0] === "orders" && path[2] === "customer-link") ||
+        (path[0] === "tools" && path[1] === "customer_link"));
+    const requestKey =
+      requestId && !issuesCustomerLink
+        ? `${identity.id}:${method}:${url.pathname}:${requestId}`
+        : undefined;
     const digest = requestKey
       ? Array.from(
           new Uint8Array(
@@ -1334,6 +1362,30 @@ export async function handleRequest(
       return json(cached.result);
     }
     if (
+      path[0] === "orders" &&
+      path.length === 3 &&
+      path[2] === "customer-link" &&
+      ["POST", "DELETE"].includes(method)
+    ) {
+      if (role !== "OWNER")
+        throw new HttpError(
+          403,
+          "Only the owner can manage customer order links.",
+        );
+      const order = findOrder(state, path[1]);
+      result =
+        method === "DELETE"
+          ? revokeCustomerOrderLink(state, order.id)
+          : await issueCustomerOrderLink(state, order, env);
+      status = method === "POST" ? 201 : 200;
+      audit(
+        state,
+        "order.customer_link",
+        method === "DELETE" ? "Customer link revoked" : "Customer link created",
+        order.external_reference,
+        order.id,
+      );
+    } else if (
       method === "POST" &&
       ((path[0] === "sessions" && !path[1]) ||
         (path[0] === "tools" && path[1] === "create_session"))
@@ -2032,7 +2084,14 @@ export async function handleRequest(
         throw new HttpError(404, "Use a server-created session ID.");
       if (tool === "get_order_state")
         return json(findOrder(state, session.order_id));
-      if (tool === "process_order_turn")
+      if (tool === "customer_link") {
+        result = await issueCustomerOrderLink(
+          state,
+          findOrder(state, session.order_id),
+          env,
+        );
+        status = 201;
+      } else if (tool === "process_order_turn")
         result = await processTurn(
           state,
           session,
