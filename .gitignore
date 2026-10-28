@@ -49,3 +49,6 @@ yarn-error.log*
 # Netlify generated artifacts and local deployment identity
 /.netlify/
 /dist-netlify/
+
+# Supabase CLI checkout-local state
+/supabase/.temp/

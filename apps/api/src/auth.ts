@@ -26,6 +26,7 @@ export interface RuntimeEnv {
   SUPABASE_URL?: string;
   SUPABASE_PUBLISHABLE_KEY?: string;
   SUPABASE_SERVER_SECRET?: string;
+  SUPABASE_MIGRATE_D1?: string;
   [key: string]: unknown;
 }
 export interface Identity {
