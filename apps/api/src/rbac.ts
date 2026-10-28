@@ -80,6 +80,7 @@ export function redactWorkspace(
     team: [],
     settings: {},
     integrations: [],
+    menu_imports: [],
   };
   if (role === "STAFF") {
     const orders = (result.orders as { status: string; id: string }[]).filter(

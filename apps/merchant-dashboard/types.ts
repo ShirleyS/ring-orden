@@ -1,9 +1,22 @@
 import { supabaseAccessToken } from "./supabase-auth";
 
 export type Obj = Record<string, any>;
+export type MenuImportSummary = {
+  id: string;
+  label: string;
+  source: "photo" | "csv" | "recovered";
+  created_at: string | null;
+  status: "active" | "unloaded";
+  unloaded_at?: string;
+  replaced_by?: string;
+  product_count: number;
+  active_count: number;
+  item_ids: string[];
+};
 export type Workspace = {
   merchant: Obj;
   catalog: Obj[];
+  menu_imports?: MenuImportSummary[];
   orders: Obj[];
   memories: Obj[];
   calls: Obj[];

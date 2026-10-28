@@ -4264,3 +4264,30 @@ td strong {
 
 .menu-photo-connection {display:flex;flex-direction:column;align-items:flex-end;gap:10px;}
 @media(max-width:640px){.menu-photo-connection{align-items:flex-start;margin-top:10px;}}
+
+/* Upload history and menu replacement review. */
+.menu-upload-history { padding:24px; margin-bottom:26px; }
+.menu-upload-history-heading { display:flex; justify-content:space-between; gap:20px; color:var(--wine); }
+.menu-upload-history h2 { font-size:21px; margin:8px 0; letter-spacing:-.4px; }
+.menu-upload-history-heading p,.menu-upload-details p,.menu-photo-import-mode p,.menu-upload-confirmation p { font-size:12px; color:var(--muted); line-height:1.7; margin:6px 0; }
+.menu-upload-list { list-style:none; padding:0; margin:18px 0 0; }
+.menu-upload-list li { display:flex; align-items:center; gap:14px; padding:15px 0; border-top:1px solid var(--line); }
+.menu-upload-details { flex:1; min-width:0; }
+.menu-upload-details strong { display:block; font-size:12px; overflow-wrap:anywhere; }
+.menu-upload-list .badge,.menu-upload-list button { flex-shrink:0; }
+.menu-upload-history>.info-banner,.menu-upload-history>.error-banner { margin:16px 0 0; }
+.menu-photo-import-mode { margin:14px 0; padding:16px; border:1px solid var(--line); border-radius:10px; background:#faf8f4; }
+.menu-photo-import-mode label { display:block; font-size:12px; font-weight:600; color:var(--wine); margin-bottom:8px; }
+.menu-photo-import-mode select { width:100%; max-width:520px; min-height:42px; padding:10px; border:1px solid var(--line); border-radius:7px; background:white; color:var(--ink); font:inherit; font-size:12px; }
+.menu-photo-import-mode select:focus-visible,.menu-upload-history button:focus-visible,.menu-upload-confirmation button:focus-visible { outline:2px solid var(--wine); outline-offset:3px; }
+.menu-upload-confirmation { margin-top:18px; padding:18px; border:1px solid #c8aaa6; border-radius:10px; background:#fcf4ee; }
+.menu-upload-confirmation>strong { font-size:13px; color:var(--wine); overflow-wrap:anywhere; }
+.menu-upload-confirm-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; margin-top:14px; }
+@media(max-width:640px) {
+ .menu-upload-history { padding:18px; }
+ .menu-upload-list li { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; }
+ .menu-upload-details { grid-column:1/-1; }
+ .menu-upload-list li>button { justify-self:end; }
+ .menu-upload-confirm-actions { flex-direction:column; align-items:stretch; }
+ .menu-upload-confirm-actions button { justify-content:center; white-space:normal; }
+}

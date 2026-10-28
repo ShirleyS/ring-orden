@@ -1,4 +1,10 @@
 import { z } from "zod";
+import {
+  listMenuImports,
+  addMenuImport,
+  unloadMenuImport,
+  restoreMenuImport,
+} from "./menu-imports.ts";
 import { extractMenuPhoto, ReviewedMenuItemSchema } from "./menu-image.ts";
 import {
   createOrder,
@@ -292,6 +298,7 @@ function bootstrap(
     storage: storageStatus(env),
     merchant: state.merchant,
     catalog: state.catalog,
+    menu_imports: role === "OWNER" ? listMenuImports(state) : [],
     orders: state.orders.map((o) => metadata(state, o)),
     memories: state.memories,
     calls: state.sessions.map((s) => ({
@@ -1389,6 +1396,8 @@ export async function handleRequest(
     if (!stored)
       throw new HttpError(503, "Merchant workspace could not be initialized.");
     const state = stored.state;
+    // Recover legacy upload provenance before any later mutation can prune old request-cache entries.
+    listMenuImports(state);
     if (method === "GET") {
       if (!trustedTool) guardMerchantRoute(role, path, method);
       if (path[0] === "customers") {
@@ -1411,6 +1420,11 @@ export async function handleRequest(
         if (role !== "OWNER")
           throw new HttpError(403, "Only the owner can import products.");
         return json({ configured: Boolean(env.FIRECRAWL_API_KEY) });
+      }
+      if (path[0] === "menu" && path[1] === "imports" && path.length === 2) {
+        if (role !== "OWNER")
+          throw new HttpError(403, "Only the owner can manage menu uploads.");
+        return json({ imports: listMenuImports(state) });
       }
       if (path[0] === "bootstrap") {
         const workspace = bootstrap(state, identity, env, role);
@@ -1876,35 +1890,57 @@ export async function handleRequest(
         .object({
           items: z.array(ReviewedMenuItemSchema).min(1).max(100),
           request_id: z.string().uuid().optional(),
+          source: z.enum(["photo", "csv"]).default("photo"),
+          label: z.string().trim().min(1).max(180).optional(),
+          replace_import_ids: z
+            .array(z.string().min(1).max(160))
+            .max(100)
+            .default([]),
         })
         .strict()
         .parse(body);
-      const names = new Set(
-        state.catalog.map((item) =>
-          item.name.trim().normalize("NFC").toLocaleLowerCase(),
-        ),
-      );
-      for (const item of batch.items) {
-        const key = item.name.normalize("NFC").toLocaleLowerCase();
-        if (names.has(key))
-          throw new HttpError(
-            409,
-            `Your menu already includes ${item.name}. Uncheck it or change its name before adding products.`,
-          );
-        names.add(key);
-      }
       const added = batch.items.map((item) =>
         CatalogItemSchema.parse({ ...item, id: uid("item"), modifiers: [] }),
       );
-      state.catalog.push(...added);
+      const imported = addMenuImport(state, added, {
+        ...batch,
+        label:
+          batch.label ?? (batch.source === "csv" ? "CSV menu" : "Menu photo"),
+      });
       audit(
         state,
         "menu.imported",
-        "Menu products added",
-        `${added.length} reviewed products added to the available menu.`,
+        batch.replace_import_ids.length
+          ? "Menu uploads replaced"
+          : "Menu products added",
+        `${added.length} reviewed products added from ${imported.label}.`,
       );
-      result = { items: added, count: added.length };
+      result = { items: added, count: added.length, import: imported };
       status = 201;
+    } else if (
+      path[0] === "menu" &&
+      path[1] === "imports" &&
+      path.length === 4 &&
+      method === "POST" &&
+      ["unload", "restore"].includes(path[3])
+    ) {
+      z.object({ request_id: z.string().uuid().optional() })
+        .strict()
+        .parse(body);
+      result =
+        path[3] === "unload"
+          ? unloadMenuImport(state, path[2])
+          : restoreMenuImport(state, path[2]);
+      const changed = result as { import: { label: string }; count: number };
+      if (changed.count)
+        audit(
+          state,
+          `menu.${path[3]}`,
+          path[3] === "unload"
+            ? "Menu upload unloaded"
+            : "Menu upload restored",
+          `${changed.import.label}: ${changed.count} products`,
+        );
     } else if (path[0] === "menu" && method === "PATCH") {
       const index = state.catalog.findIndex((item) => item.id === path[1]);
       if (index < 0) throw new HttpError(404, "Menu item not found.");

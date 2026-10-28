@@ -74,6 +74,7 @@ test("new sessions start in Spanish and customer recognition survives another co
     first.data.customer_id,
   );
   assert.equal(second.data.customer_context.verified, false);
+  assert.equal(second.data.customer_context.display_name, "Ana");
   const history = await f.call(
     "tools/get_previous_orders",
     "POST",
@@ -81,6 +82,152 @@ test("new sessions start in Spanish and customer recognition survives another co
     true,
   );
   assert.equal(history.status, 403);
+});
+
+test("a recognized caller starts empty and confirms a name without copying a previous order", async () => {
+  const f = await fixture();
+  const stored = await f.repo.loadByMerchant(f.env.AGENT_MERCHANT_ID);
+  assert.ok(stored);
+  stored.state.settings.agent.after_hours = "accept_orders";
+  const item = stored.state.catalog.find((entry) => entry.available)!;
+  assert.ok(item);
+  assert.equal(
+    await f.repo.saveTrusted(
+      f.env.AGENT_MERCHANT_ID,
+      stored.revision,
+      stored.state,
+    ),
+    true,
+  );
+  const added = await f.call(
+    "tools/apply_order_operations",
+    "POST",
+    {
+      session_id: f.session.data.session_id,
+      request_id: "original-items",
+      utterance: "Uno, por favor",
+      operations_json: JSON.stringify([
+        { action: "add_item", catalog_item_id: item.id, quantity: 1 },
+      ]),
+    },
+    true,
+  );
+  assert.equal(added.status, 200, JSON.stringify(added.data));
+  const original = await f.repo.loadByMerchant(f.env.AGENT_MERCHANT_ID);
+  assert.ok(original);
+  const previous = original.state.orders.find(
+    (order) => order.id === f.session.data.order_id,
+  )!;
+  assert.equal(previous.items.length, 1);
+  previous.status = "COMPLETED";
+  previous.payment_status = "PAID";
+  assert.equal(
+    await f.repo.saveTrusted(
+      f.env.AGENT_MERCHANT_ID,
+      original.revision,
+      original.state,
+    ),
+    true,
+  );
+
+  const fresh = await f.call(
+    "tools/create_session",
+    "POST",
+    {
+      request_id: "new-call-empty",
+      phone: "+525555550123",
+    },
+    true,
+  );
+  assert.equal(fresh.status, 201, JSON.stringify(fresh.data));
+  assert.notEqual(fresh.data.order_id, previous.id);
+  assert.equal(
+    fresh.data.customer_context.customer_id,
+    f.session.data.customer_context.customer_id,
+  );
+  assert.equal(fresh.data.customer_context.display_name, "Ana");
+  assert.equal(fresh.data.customer_context.verified, false);
+  assert.equal(fresh.data.order.customer.name, null);
+  assert.deepEqual(fresh.data.order.items, []);
+  assert.equal(fresh.data.order.total, 0);
+
+  const named = await f.call(
+    "tools/apply_order_operations",
+    "POST",
+    {
+      session_id: fresh.data.session_id,
+      request_id: "confirmed-name",
+      utterance: "Sí, soy Ana",
+      operations_json: JSON.stringify([
+        { action: "set_customer_name", name: "Ana" },
+      ]),
+    },
+    true,
+  );
+  assert.equal(named.status, 200, JSON.stringify(named.data));
+  assert.equal(named.data.order.customer.name, "Ana");
+  assert.deepEqual(named.data.order.items, []);
+  assert.equal(named.data.order.total, 0);
+  const history = await f.call(
+    "tools/get_previous_orders",
+    "POST",
+    { session_id: fresh.data.session_id },
+    true,
+  );
+  assert.equal(
+    history.status,
+    403,
+    "Name confirmation does not grant protected history access.",
+  );
+  const unchanged = await f.repo.loadByMerchant(f.env.AGENT_MERCHANT_ID);
+  assert.deepEqual(
+    unchanged!.state.orders.find((order) => order.id === previous.id),
+    previous,
+  );
+});
+
+test("a name given after session creation is recognized on a later call without carrying items or verification", async () => {
+  const f = await fixture();
+  const first = await f.call(
+    "tools/create_session",
+    "POST",
+    {
+      request_id: "unknown-caller",
+      phone: "+525555550999",
+    },
+    true,
+  );
+  assert.equal(first.status, 201);
+  assert.equal(first.data.customer_context.display_name, null);
+  const named = await f.call(
+    "tools/apply_order_operations",
+    "POST",
+    {
+      session_id: first.data.session_id,
+      request_id: "new-name",
+      utterance: "Me llamo Luisa",
+      operations_json: JSON.stringify([
+        { action: "set_customer_name", name: "Luisa" },
+      ]),
+    },
+    true,
+  );
+  assert.equal(named.status, 200, JSON.stringify(named.data));
+  const next = await f.call(
+    "tools/create_session",
+    "POST",
+    {
+      request_id: "returning-caller",
+      phone: "+525555550999",
+    },
+    true,
+  );
+  assert.equal(next.status, 201);
+  assert.equal(next.data.customer_context.display_name, "Luisa");
+  assert.equal(next.data.customer_context.verified, false);
+  assert.equal(next.data.order.customer.name, null);
+  assert.deepEqual(next.data.order.items, []);
+  assert.equal(next.data.order.total, 0);
 });
 
 test("verified capability authorizes only its bound session and saved preferences persist", async () => {
