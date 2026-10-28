@@ -62,6 +62,10 @@ export async function retryDuePOS(
       latest.state.order_metadata[id] = {
         ...meta,
         customer_link: latestMeta.customer_link,
+        receipt_link: latestMeta.receipt_link,
+        billing: latestMeta.billing,
+        receipt_consent: latestMeta.receipt_consent,
+        receipt_notification: latestMeta.receipt_notification,
       };
       const latestOrder = latest.state.orders.find((o) => o.id === id)!;
       if (latestOrder.revision === order.revision)

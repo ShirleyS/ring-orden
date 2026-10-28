@@ -51,6 +51,10 @@ import { seedTenant } from "./seed.ts";
 import { SettingsSchemas, orderingIsOpen } from "./settings.ts";
 import { retryDuePOS } from "./pos-retry.ts";
 import {
+  recordReceiptConsent,
+  sendPendingCustomerReceipt,
+} from "./customer-receipt-delivery.ts";
+import {
   handleCustomerOrderRequest,
   issueCustomerOrderLink,
   revokeCustomerOrderLink,
@@ -116,7 +120,8 @@ function summary(order: Order) {
 }
 
 function metadata(state: TenantState, order: Order) {
-  const {billing: _billing, ...safeMetadata} = state.order_metadata[order.id] ?? {};
+  const { billing: _billing, ...safeMetadata } =
+    state.order_metadata[order.id] ?? {};
   return {
     ...order,
     ...safeMetadata,
@@ -587,7 +592,11 @@ async function deliverPendingOrder(
       }
     } else if (order.status === "CONFIRMED")
       order = transitionOrder(order, "PAYMENT_PENDING");
-    if (env.TWILIO_ACCOUNT_SID && state.settings.notifications.whatsapp) {
+    if (
+      !env.CUSTOMER_APP_ORIGIN &&
+      env.TWILIO_ACCOUNT_SID &&
+      state.settings.notifications.whatsapp
+    ) {
       try {
         const sent = await sendWhatsApp(order, meta.checkout_url, env);
         meta.notification_status = sent.status.toUpperCase();
@@ -635,6 +644,11 @@ async function deliverPendingOrder(
       ...meta,
       // A provider snapshot must never restore a revoked or replaced capability.
       customer_link: latest.state.order_metadata[orderId]?.customer_link,
+      receipt_link: latest.state.order_metadata[orderId]?.receipt_link,
+      billing: latest.state.order_metadata[orderId]?.billing,
+      receipt_consent: latest.state.order_metadata[orderId]?.receipt_consent,
+      receipt_notification:
+        latest.state.order_metadata[orderId]?.receipt_notification,
     };
     if (
       latestOrder.revision ===
@@ -647,8 +661,11 @@ async function deliverPendingOrder(
       ...state.events.filter((e) => !ids.has(e.id)),
       ...latest.state.events,
     ].slice(0, 500);
-    if (await repo.saveTrusted(merchantId, latest.revision, latest.state))
+    if (await repo.saveTrusted(merchantId, latest.revision, latest.state)) {
+      if (env.CUSTOMER_APP_ORIGIN)
+        await sendPendingCustomerReceipt(repo, merchantId, orderId, env);
       return findOrder(latest.state, orderId);
+    }
   }
   return order;
 }
@@ -1277,8 +1294,17 @@ export async function handleRequest(
         if (path[1]) {
           const order = findOrder(state, path[1]);
           if (path[2] === "billing" && path.length === 3) {
-            if (role !== "OWNER") throw new HttpError(403,"Only the owner can view billing details.");
-            return json(state.order_metadata[order.id]?.billing ?? {revision:0,details:null});
+            if (role !== "OWNER")
+              throw new HttpError(
+                403,
+                "Only the owner can view billing details.",
+              );
+            return json(
+              state.order_metadata[order.id]?.billing ?? {
+                revision: 0,
+                details: null,
+              },
+            );
           }
           if (role === "STAFF" && !active(order))
             throw new HttpError(403, "Staff can only access active orders.");
@@ -1341,7 +1367,8 @@ export async function handleRequest(
     // A capability URL is returned only once; never retain it in the response cache.
     const issuesCustomerLink =
       method === "POST" &&
-      ((path[0] === "orders" && ["customer-link", "receipt-link"].includes(path[2])) ||
+      ((path[0] === "orders" &&
+        ["customer-link", "receipt-link"].includes(path[2])) ||
         (path[0] === "tools" && path[1] === "customer_link"));
     const requestKey =
       requestId && !issuesCustomerLink
@@ -1371,6 +1398,24 @@ export async function handleRequest(
     if (
       path[0] === "orders" &&
       path.length === 3 &&
+      path[2] === "receipt-send" &&
+      method === "POST"
+    ) {
+      if (role !== "OWNER")
+        throw new HttpError(403, "Only the owner can send receipts.");
+      z.object({ customer_opted_in: z.literal(true) })
+        .strict()
+        .parse(body);
+      const order = findOrder(state, path[1]);
+      recordReceiptConsent(state, order, true);
+      if (!(await repo.save(merchantId, identity.id, stored.revision, state)))
+        throw new HttpError(409, "The order changed. Refresh before sending.");
+      return json(
+        await sendPendingCustomerReceipt(repo, merchantId, order.id, env, true),
+      );
+    } else if (
+      path[0] === "orders" &&
+      path.length === 3 &&
       ["customer-link", "receipt-link"].includes(path[2]) &&
       ["POST", "DELETE"].includes(method)
     ) {
@@ -1382,8 +1427,12 @@ export async function handleRequest(
       const order = findOrder(state, path[1]);
       result =
         method === "DELETE"
-          ? (path[2] === "receipt-link" ? revokeCustomerReceiptLink(state,order.id) : revokeCustomerOrderLink(state, order.id))
-          : await (path[2] === "receipt-link" ? issueCustomerReceiptLink(state,order,env) : issueCustomerOrderLink(state, order, env));
+          ? path[2] === "receipt-link"
+            ? revokeCustomerReceiptLink(state, order.id)
+            : revokeCustomerOrderLink(state, order.id)
+          : await (path[2] === "receipt-link"
+              ? issueCustomerReceiptLink(state, order, env)
+              : issueCustomerOrderLink(state, order, env));
       status = method === "POST" ? 201 : 200;
       audit(
         state,
@@ -1543,6 +1592,11 @@ export async function handleRequest(
             422,
             "Explicit customer confirmation is required.",
           );
+        recordReceiptConsent(
+          state,
+          order,
+          z.boolean().optional().parse(body.whatsapp_receipt),
+        );
         if (
           ["DRAFT", "AWAITING_CLARIFICATION", "AWAITING_CONFIRMATION"].includes(
             order.status,
@@ -2110,6 +2164,11 @@ export async function handleRequest(
         if (body.confirmed !== true)
           throw new HttpError(422, "Explicit customer confirmation required.");
         const utterance = z.string().min(1).max(1500).parse(body.utterance);
+        recordReceiptConsent(
+          state,
+          findOrder(state, session.order_id),
+          z.boolean().optional().parse(body.whatsapp_receipt),
+        );
         result = await processTurn(state, session, utterance, env, url.origin);
       } else if (["request_human", "escalate_issue"].includes(tool)) {
         let order = findOrder(state, session.order_id);

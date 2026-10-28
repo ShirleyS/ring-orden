@@ -1,4 +1,5 @@
 export interface RuntimeEnv {
+  TWILIO_RECEIPT_TEMPLATE_SID?: string;
   DB?: D1Database;
   MOJOAUTH_JWKS_URL?: string;
   MOJOAUTH_ISSUER?: string;

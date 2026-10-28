@@ -119,6 +119,7 @@ export async function sendWhatsApp(
   order: Order,
   paymentUrl: string | undefined,
   env: RuntimeEnv,
+  receipt = false,
 ): Promise<{ id: string; status: string }> {
   if (
     !env.TWILIO_ACCOUNT_SID ||
@@ -143,8 +144,16 @@ export async function sendWhatsApp(
       : "whatsapp:" + env.TWILIO_WHATSAPP_FROM,
     To: "whatsapp:" + order.customer.phone,
   });
-  if (env.TWILIO_WHATSAPP_TEMPLATE_SID) {
-    params.set("ContentSid", env.TWILIO_WHATSAPP_TEMPLATE_SID);
+  const template = receipt
+    ? env.TWILIO_RECEIPT_TEMPLATE_SID
+    : env.TWILIO_WHATSAPP_TEMPLATE_SID;
+  if (receipt && !template)
+    throw new HttpError(
+      503,
+      "Configure the dedicated receipt WhatsApp template.",
+    );
+  if (template) {
+    params.set("ContentSid", template);
     params.set(
       "ContentVariables",
       JSON.stringify({
@@ -152,6 +161,18 @@ export async function sendWhatsApp(
         "2": summary,
         "3": `${order.total.toFixed(2)} ${order.currency}`,
         "4": paymentUrl ?? "Pay at pickup",
+        ...(receipt
+          ? {
+              "5":
+                order.payment_status === "PAID"
+                  ? "Pagado"
+                  : ["CANCELLED", "REFUND_PENDING", "REFUNDED"].includes(
+                        order.status,
+                      )
+                    ? "Consulta el estado actualizado"
+                    : "Pago pendiente",
+            }
+          : {}),
       }),
     );
   } else
@@ -184,6 +205,11 @@ export async function sendWhatsApp(
     );
   return { id: result.sid, status: result.status };
 }
+export const sendReceiptWhatsApp = (
+  order: Order,
+  receiptUrl: string,
+  env: RuntimeEnv,
+) => sendWhatsApp(order, receiptUrl, env, true);
 /** Invalidate the old amount before editing a confirmed-but-unpaid transaction. */
 export async function expireCheckout(
   checkoutId: string,

@@ -7,7 +7,11 @@ export function guardMerchantRoute(
   body?: Record<string, unknown>,
 ) {
   if (role === "OWNER") return;
-  if (["customer-link", "receipt-link", "receipt-send", "billing"].includes(path[2]))
+  if (
+    ["customer-link", "receipt-link", "receipt-send", "billing"].includes(
+      path[2],
+    )
+  )
     throw new HttpError(403, "Only the owner can manage customer order links.");
   const route = path[0];
   if (method === "GET") {
@@ -137,6 +141,8 @@ export function redactOrderForRole<T extends Record<string, unknown>>(
   delete result.checkout_id;
   delete result.customer_link;
   delete result.receipt_link;
+  delete result.receipt_consent;
+  delete result.receipt_notification;
   if (role === "STAFF") {
     delete result.customer_phone;
     if (result.customer && typeof result.customer === "object")

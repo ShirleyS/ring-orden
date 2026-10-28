@@ -42,6 +42,13 @@ export interface OrderMetadata {
   customer_link?: { hash: string; expires_at: string };
   receipt_link?: { hash: string; expires_at: string };
   billing?: BillingSubmission;
+  receipt_consent?: { phone: string; recorded_at: string };
+  receipt_notification?: {
+    claim: string;
+    status: string;
+    updated_at: string;
+    provider_id?: string;
+  };
   pos_status: string;
   notification_status: string;
   checkout_id?: string;

@@ -78,6 +78,7 @@ const confirmSchema = z
     revision: revisionSchema,
     reviewed_total: z.number().finite().nonnegative(),
     confirmed: z.literal(true),
+    whatsapp_receipt: z.boolean().optional(),
   })
   .strict();
 
@@ -175,8 +176,8 @@ export async function issueCustomerOrderLink(
   const origin = customerOrigin(env);
   if (scope === "receipt" && draftStatuses.has(order.status))
     throw new HttpError(409, "Confirm this order before creating a receipt.");
-  if (scope === "order" &&
-    order.merchant_id !== state.merchant.id ||
+  if (
+    (scope === "order" && order.merchant_id !== state.merchant.id) ||
     !state.orders.some((o) => o.id === order.id)
   )
     throw new HttpError(404, "Order not found in your workspace.");
@@ -194,30 +195,40 @@ export async function issueCustomerOrderLink(
       merchant_id: state.merchant.id,
       order_id: order.id,
       secret,
-      ...(scope === "receipt" ? {scope} : {}),
+      ...(scope === "receipt" ? { scope } : {}),
     }),
   )
     .replace(/=/g, "")
     .replace(/\+/g, "-")
     .replace(/\//g, "_");
-  const expires_at = new Date(Date.now() + (scope === "receipt" ? 7 * 86400_000 : 60 * 60_000)).toISOString();
+  const expires_at = new Date(
+    Date.now() + (scope === "receipt" ? 7 * 86400_000 : 60 * 60_000),
+  ).toISOString();
   state.order_metadata[order.id] ??= {
     pos_status: "DASHBOARD_ONLY",
     notification_status: "PENDING",
     demo: env.DEMO_MODE !== "false",
   };
-  state.order_metadata[order.id][scope === "receipt" ? "receipt_link" : "customer_link"] = {
+  state.order_metadata[order.id][
+    scope === "receipt" ? "receipt_link" : "customer_link"
+  ] = {
     hash: await sha256Hex(token),
     expires_at,
   };
-  return { url: `${origin}/${scope === "receipt" ? "receipt" : "order"}#${token}`, expires_at };
+  return {
+    url: `${origin}/${scope === "receipt" ? "receipt" : "order"}#${token}`,
+    expires_at,
+  };
 }
 
-export const issueCustomerReceiptLink = (state: TenantState, order: Order, env: RuntimeEnv) =>
-  issueCustomerOrderLink(state, order, env, "receipt");
+export const issueCustomerReceiptLink = (
+  state: TenantState,
+  order: Order,
+  env: RuntimeEnv,
+) => issueCustomerOrderLink(state, order, env, "receipt");
 export function revokeCustomerReceiptLink(state: TenantState, orderId: string) {
   delete state.order_metadata[orderId]?.receipt_link;
-  return {revoked:true};
+  return { revoked: true };
 }
 
 export function revokeCustomerOrderLink(state: TenantState, orderId: string) {
@@ -248,7 +259,10 @@ async function authenticate(request: Request, repo: Repository) {
     (o) => o.id === envelope.order_id && o.merchant_id === envelope.merchant_id,
   );
   const scope = envelope.scope ?? "order";
-  const grant = stored?.state.order_metadata[envelope.order_id]?.[scope === "receipt" ? "receipt_link" : "customer_link"];
+  const grant =
+    stored?.state.order_metadata[envelope.order_id]?.[
+      scope === "receipt" ? "receipt_link" : "customer_link"
+    ];
   const digest = await sha256Hex(token);
   let difference = 0;
   const expected = grant?.hash ?? "0".repeat(64);
@@ -422,22 +436,51 @@ export async function handleCustomerOrderRequest(
       expires_at,
       scope,
     } = await authenticate(request, repo);
-    if (scope === "receipt" && !["/api/customer/receipt", "/api/customer/billing", "/api/customer/checkout"].includes(route))
-      throw new HttpError(403,"This receipt link cannot change or confirm an order.");
-    if (scope !== "receipt" && ["/api/customer/receipt", "/api/customer/billing"].includes(route))
-      throw new HttpError(403,"Use the receipt link to access billing.");
+    if (
+      scope === "receipt" &&
+      ![
+        "/api/customer/receipt",
+        "/api/customer/billing",
+        "/api/customer/checkout",
+      ].includes(route)
+    )
+      throw new HttpError(
+        403,
+        "This receipt link cannot change or confirm an order.",
+      );
+    if (
+      scope !== "receipt" &&
+      ["/api/customer/receipt", "/api/customer/billing"].includes(route)
+    )
+      throw new HttpError(403, "Use the receipt link to access billing.");
     const state = stored.state;
     let order = originalOrder;
     if (request.method === "GET") {
-      const view=customerView(state,order,expires_at,services);
-      return json(scope === "receipt" ? {...view,editable:false,catalog:[],billing:billingSummary(state,order.id)} : view);
+      const view = customerView(state, order, expires_at, services);
+      return json(
+        scope === "receipt"
+          ? {
+              ...view,
+              editable: false,
+              catalog: [],
+              billing: billingSummary(state, order.id),
+            }
+          : view,
+      );
     }
     const body = await readBody(request);
     if (route.endsWith("/billing")) {
-      if (draftStatuses.has(order.status)) throw new HttpError(409,"Confirm the order before submitting billing details.");
-      const result=saveBillingDetails(state,order.id,body);
-      if (!(await repo.saveTrusted(state.merchant.id,stored.revision,state)))
-        throw new HttpError(409,"Billing details changed. Refresh and try again.");
+      if (draftStatuses.has(order.status))
+        throw new HttpError(
+          409,
+          "Confirm the order before submitting billing details.",
+        );
+      const result = saveBillingDetails(state, order.id, body);
+      if (!(await repo.saveTrusted(state.merchant.id, stored.revision, state)))
+        throw new HttpError(
+          409,
+          "Billing details changed. Refresh and try again.",
+        );
       return json(result);
     }
     if (route.endsWith("/checkout")) {
@@ -468,6 +511,11 @@ export async function handleCustomerOrderRequest(
     }
     if (route.endsWith("/confirm")) {
       const input = confirmSchema.parse(body);
+      if (input.whatsapp_receipt === true && !order.customer.phone)
+        throw new HttpError(
+          422,
+          "A customer phone number is needed for WhatsApp receipts.",
+        );
       // Confirmation is idempotent: never repeat fulfillment or create another checkout.
       if (canPay(order) || order.payment_status === "PAID")
         return json(customerView(state, order, expires_at, services));
@@ -522,6 +570,11 @@ export async function handleCustomerOrderRequest(
         env,
         new URL(request.url).origin,
       );
+      if (input.whatsapp_receipt === true)
+        state.order_metadata[order.id].receipt_consent = {
+          phone: order.customer.phone!,
+          recorded_at: new Date().toISOString(),
+        };
     } else {
       const input = patchSchema.parse(body);
       if (!canEdit(order))
