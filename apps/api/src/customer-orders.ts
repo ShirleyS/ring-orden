@@ -168,7 +168,14 @@ export async function issueCustomerOrderLink(
   state: TenantState,
   order: Order,
   env: RuntimeEnv,
+  ttlMilliseconds = 60 * 60_000,
 ) {
+  if (
+    !Number.isFinite(ttlMilliseconds) ||
+    ttlMilliseconds <= 0 ||
+    ttlMilliseconds > 60 * 60_000
+  )
+    throw new HttpError(422, "Invalid customer link lifetime.");
   const origin = customerOrigin(env);
   if (
     order.merchant_id !== state.merchant.id ||
@@ -194,7 +201,7 @@ export async function issueCustomerOrderLink(
     .replace(/=/g, "")
     .replace(/\+/g, "-")
     .replace(/\//g, "_");
-  const expires_at = new Date(Date.now() + 60 * 60_000).toISOString();
+  const expires_at = new Date(Date.now() + ttlMilliseconds).toISOString();
   state.order_metadata[order.id] ??= {
     pos_status: "DASHBOARD_ONLY",
     notification_status: "PENDING",

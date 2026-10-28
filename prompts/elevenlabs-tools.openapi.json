@@ -65,6 +65,9 @@
           "200": {
             "description": "Previously saved result for an identical request_id and body"
           },
+          "201": {
+            "description": "New authoritative merchant-scoped ordering session"
+          },
           "401": {
             "description": "Invalid server agent credential"
           },
@@ -73,9 +76,6 @@
           },
           "409": {
             "description": "Operation cannot be applied to current order"
-          },
-          "201": {
-            "description": "New authoritative merchant-scoped ordering session"
           }
         }
       }
@@ -455,6 +455,553 @@
           },
           "409": {
             "description": "Operation cannot be applied to current order"
+          }
+        }
+      }
+    },
+    "/api/tools/get_customer_context": {
+      "post": {
+        "operationId": "get_customer_context",
+        "summary": "Read minimal permitted customer context for this session. Caller recognition is not verification.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "dynamic_variable": "ring_orden_session_id"
+                  }
+                },
+                "required": [
+                  "session_id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative bounded tool result; check status and verification requirements."
+          },
+          "401": {
+            "description": "Invalid service authentication."
+          },
+          "403": {
+            "description": "Customer verification or tenant authorization required."
+          }
+        }
+      }
+    },
+    "/api/tools/get_customer_preferences": {
+      "post": {
+        "operationId": "get_customer_preferences",
+        "summary": "Read saved explicit preferences and inferred suggestions; obey redaction and verification_required.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "dynamic_variable": "ring_orden_session_id"
+                  }
+                },
+                "required": [
+                  "session_id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative bounded tool result; check status and verification requirements."
+          },
+          "401": {
+            "description": "Invalid service authentication."
+          },
+          "403": {
+            "description": "Customer verification or tenant authorization required."
+          }
+        }
+      }
+    },
+    "/api/tools/update_customer_preference": {
+      "post": {
+        "operationId": "update_customer_preference",
+        "summary": "Save a permanent preference only after the caller explicitly confirms; verified identity is required. One-time order instructions belong in process_order_turn.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "dynamic_variable": "ring_orden_session_id"
+                  },
+                  "preference_key": {
+                    "type": "string",
+                    "description": "A bounded preference key, for example milk or sweetness."
+                  },
+                  "preference_value": {
+                    "type": "string",
+                    "description": "The customer's confirmed preference, not an inferred assumption."
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "permanent"
+                    ]
+                  },
+                  "confirmed": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "session_id",
+                  "preference_key",
+                  "preference_value",
+                  "scope",
+                  "confirmed"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative bounded tool result; check status and verification requirements."
+          },
+          "401": {
+            "description": "Invalid service authentication."
+          },
+          "403": {
+            "description": "Customer verification or tenant authorization required."
+          }
+        }
+      }
+    },
+    "/api/tools/get_previous_orders": {
+      "post": {
+        "operationId": "get_previous_orders",
+        "summary": "Read verified customer order history. A caller phone match alone does not authorize history.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "dynamic_variable": "ring_orden_session_id"
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "recent",
+                      "most_recent",
+                      "frequent"
+                    ]
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 20
+                  }
+                },
+                "required": [
+                  "session_id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative bounded tool result; check status and verification requirements."
+          },
+          "401": {
+            "description": "Invalid service authentication."
+          },
+          "403": {
+            "description": "Customer verification or tenant authorization required."
+          }
+        }
+      }
+    },
+    "/api/tools/reorder_previous_order": {
+      "post": {
+        "operationId": "reorder_previous_order",
+        "summary": "Create a separate repriced draft from a verified completed order. Never submits; read back and obtain confirmation before confirm_order.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "dynamic_variable": "ring_orden_session_id"
+                  },
+                  "order_id": {
+                    "type": "string",
+                    "description": "An authorized previous order ID returned by get_previous_orders."
+                  }
+                },
+                "required": [
+                  "session_id",
+                  "order_id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative bounded tool result; check status and verification requirements."
+          },
+          "401": {
+            "description": "Invalid service authentication."
+          },
+          "403": {
+            "description": "Customer verification or tenant authorization required."
+          }
+        }
+      }
+    },
+    "/api/tools/get_billing_profile_status": {
+      "post": {
+        "operationId": "get_billing_profile_status",
+        "summary": "Check whether billing profiles exist without exposing RFC or fiscal details.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "dynamic_variable": "ring_orden_session_id"
+                  }
+                },
+                "required": [
+                  "session_id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative bounded tool result; check status and verification requirements."
+          },
+          "401": {
+            "description": "Invalid service authentication."
+          },
+          "403": {
+            "description": "Customer verification or tenant authorization required."
+          }
+        }
+      }
+    },
+    "/api/tools/request_invoice": {
+      "post": {
+        "operationId": "request_invoice",
+        "summary": "Create a pending invoice request for an eligible paid order and verified billing profile. Never claim CFDI issued unless issued:true.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "dynamic_variable": "ring_orden_session_id"
+                  },
+                  "order_id": {
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "type": "string"
+                  },
+                  "confirmed": {
+                    "type": "boolean",
+                    "description": "True only after the customer explicitly requests and confirms this invoice request."
+                  }
+                },
+                "required": [
+                  "session_id",
+                  "order_id",
+                  "confirmed"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative bounded tool result; check status and verification requirements."
+          },
+          "401": {
+            "description": "Invalid service authentication."
+          },
+          "403": {
+            "description": "Customer verification or tenant authorization required."
+          }
+        }
+      }
+    },
+    "/api/tools/verify_customer": {
+      "post": {
+        "operationId": "verify_customer",
+        "summary": "Initiate verification through a secure WhatsApp link only after consent. QUEUED does not mean delivered. Never ask the caller to read a secret aloud.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "dynamic_variable": "ring_orden_session_id"
+                  },
+                  "consent": {
+                    "type": "boolean",
+                    "description": "True only if the caller explicitly agreed to receive this verification link on WhatsApp."
+                  }
+                },
+                "required": [
+                  "session_id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative bounded tool result; check status and verification requirements."
+          },
+          "401": {
+            "description": "Invalid service authentication."
+          },
+          "403": {
+            "description": "Customer verification or tenant authorization required."
+          }
+        }
+      }
+    },
+    "/api/tools/customer_followup": {
+      "post": {
+        "operationId": "customer_followup",
+        "summary": "Queue a WhatsApp secure form link after explicit consent: billing for RFC, receipt for completed/confirmed order, recovery for the exact partial order within ten minutes. Report actual queue/provider status.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "dynamic_variable": "ring_orden_session_id"
+                  },
+                  "purpose": {
+                    "type": "string",
+                    "enum": [
+                      "billing",
+                      "receipt",
+                      "recovery"
+                    ]
+                  },
+                  "consent": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "session_id",
+                  "purpose",
+                  "consent"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative bounded tool result; check status and verification requirements."
+          },
+          "401": {
+            "description": "Invalid service authentication."
+          },
+          "403": {
+            "description": "Customer verification or tenant authorization required."
+          }
+        }
+      }
+    },
+    "/api/tools/customer_link": {
+      "post": {
+        "operationId": "customer_link",
+        "summary": "Issue the existing customer order link without sending a message. Prefer customer_followup for consent-aware WhatsApp delivery.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "dynamic_variable": "ring_orden_session_id"
+                  }
+                },
+                "required": [
+                  "session_id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative bounded tool result; check status and verification requirements."
+          },
+          "401": {
+            "description": "Invalid service authentication."
+          },
+          "403": {
+            "description": "Customer verification or tenant authorization required."
+          }
+        }
+      }
+    },
+    "/api/tools/set_customer_followup_consent": {
+      "post": {
+        "operationId": "set_customer_followup_consent",
+        "summary": "Record explicit permission for a WhatsApp receipt when completed, or a ten-minute recovery link if this call ends with an unfinished order. This schedules permission; it does not claim a message was sent.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "dynamic_variable": "ring_orden_session_id"
+                  },
+                  "purpose": {
+                    "type": "string",
+                    "enum": [
+                      "receipt",
+                      "recovery"
+                    ]
+                  },
+                  "consent": {
+                    "type": "boolean"
+                  },
+                  "utterance": {
+                    "type": "string",
+                    "description": "The customer's exact words agreeing to or declining this specific follow-up."
+                  }
+                },
+                "required": [
+                  "session_id",
+                  "purpose",
+                  "consent",
+                  "utterance"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bounded authoritative result; check status and verification."
+          },
+          "401": {
+            "description": "Invalid authentication"
+          },
+          "403": {
+            "description": "Verification required"
           }
         }
       }

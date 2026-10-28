@@ -51,6 +51,24 @@ import { seedTenant } from "./seed.ts";
 import { SettingsSchemas, orderingIsOpen } from "./settings.ts";
 import { retryDuePOS } from "./pos-retry.ts";
 import {
+  handleCustomerTool,
+  handleCustomerMerchant,
+  normalizePhone,
+  issueCustomerVerificationChallenge,
+  readCustomerVerificationTenant,
+  completeCustomerVerification,
+} from "./customer-memory.ts";
+import {
+  handleAutomationTool,
+  queueCustomerVerification,
+} from "./customer-automation.ts";
+import { handleCustomerCapability } from "./customer-capabilities.ts";
+import {
+  handleElevenLabsEvent,
+  queueCompletedReceipts,
+  saveFollowupConsent,
+} from "./followup-events.ts";
+import {
   handleCustomerOrderRequest,
   issueCustomerOrderLink,
   revokeCustomerOrderLink,
@@ -1082,6 +1100,74 @@ async function stripeWebhook(
   }
   return json({ received: true });
 }
+async function handleCustomerVerificationRequest(
+  request: Request,
+  env: RuntimeEnv,
+  repo: Repository,
+): Promise<Response> {
+  let origin: string;
+  try {
+    const parsed = new URL(String(env.CUSTOMER_APP_ORIGIN));
+    const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(
+      parsed.hostname,
+    );
+    if (
+      (parsed.protocol !== "https:" &&
+        !(loopback && parsed.protocol === "http:")) ||
+      parsed.username ||
+      parsed.password ||
+      parsed.pathname !== "/" ||
+      parsed.search ||
+      parsed.hash
+    )
+      throw new Error();
+    origin = parsed.origin;
+  } catch {
+    throw new HttpError(503, "Customer verification is not configured.");
+  }
+  if (request.headers.get("Origin") !== origin)
+    throw new HttpError(403, "Customer origin is not allowed.");
+  const headers = {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    Vary: "Origin",
+    "Referrer-Policy": "no-referrer",
+  };
+  if (new URL(request.url).pathname !== "/api/customer/verify")
+    return json({ error: "Endpoint not found." }, 404, headers);
+  if (request.method === "OPTIONS")
+    return new Response(null, { status: 204, headers });
+  if (
+    request.method !== "POST" ||
+    new URL(request.url).pathname !== "/api/customer/verify"
+  )
+    return json({ error: "Endpoint not found." }, 404, headers);
+  try {
+    const body = await bodyOf(request);
+    const token = z.string().min(80).max(1600).parse(body.token);
+    const merchantId = readCustomerVerificationTenant(token);
+    const stored = await repo.loadByMerchant(merchantId);
+    if (!stored)
+      throw new HttpError(401, "This verification link is invalid or expired.");
+    const result = await completeCustomerVerification(stored.state, token);
+    if (!(await repo.saveTrusted(merchantId, stored.revision, stored.state)))
+      throw new HttpError(409, "Another update arrived. Please try again.");
+    return json(result, 200, headers);
+  } catch (error) {
+    return json(
+      {
+        error:
+          error instanceof HttpError
+            ? error.message
+            : "This verification link is invalid or expired.",
+      },
+      error instanceof HttpError ? error.status : 401,
+      headers,
+    );
+  }
+}
+
 export async function handleRequest(
   request: Request,
   env: RuntimeEnv = {},
@@ -1096,6 +1182,10 @@ export async function handleRequest(
     const method = request.method;
     if (path[0] === "customer") {
       const repo = repository ?? repositoryFor(env);
+      if (path[1] === "verify")
+        return await handleCustomerVerificationRequest(request, env, repo);
+      const capability = await handleCustomerCapability(request, env, repo);
+      if (capability) return capability;
       return handleCustomerOrderRequest(request, env, repo, {
         rules,
         orderingAllowed,
@@ -1117,6 +1207,13 @@ export async function handleRequest(
     const repo = repository ?? repositoryFor(env);
     if (path[0] === "webhooks" && path[1] === "stripe")
       return await stripeWebhook(request, env, repo);
+    if (
+      path[0] === "webhooks" &&
+      path[1] === "elevenlabs" &&
+      path.length === 2 &&
+      method === "POST"
+    )
+      return await handleElevenLabsEvent(request, env, repo);
     validateMutationOrigin(request);
     if (path[0] === "auth" && path[1] === "session" && method === "POST") {
       const body = await bodyOf(request);
@@ -1253,6 +1350,22 @@ export async function handleRequest(
     const state = stored.state;
     if (method === "GET") {
       if (!trustedTool) guardMerchantRoute(role, path, method);
+      if (path[0] === "customers") {
+        const result = handleCustomerMerchant(state, path, method, {}, role);
+        // Recognition may materialize records from canonical order contacts.
+        const saved = await repo.save(
+          merchantId,
+          identity.id,
+          stored.revision,
+          state,
+        );
+        if (!saved)
+          throw new HttpError(
+            409,
+            "Another update just arrived. Please try again.",
+          );
+        return json(result);
+      }
       if (path[0] === "bootstrap") {
         const workspace = bootstrap(state, identity, env, role);
         workspace.orders = workspace.orders.map((order) =>
@@ -1333,9 +1446,10 @@ export async function handleRequest(
       (typeof body.request_id === "string" ? body.request_id : undefined);
     // A capability URL is returned only once; never retain it in the response cache.
     const issuesCustomerLink =
-      method === "POST" &&
-      ((path[0] === "orders" && path[2] === "customer-link") ||
-        (path[0] === "tools" && path[1] === "customer_link"));
+      path[0] === "customers" ||
+      (method === "POST" &&
+        ((path[0] === "orders" && path[2] === "customer-link") ||
+          (path[0] === "tools" && path[1] === "customer_link")));
     const requestKey =
       requestId && !issuesCustomerLink
         ? `${identity.id}:${method}:${url.pathname}:${requestId}`
@@ -1361,7 +1475,31 @@ export async function handleRequest(
         );
       return json(cached.result);
     }
-    if (
+    if (path[0] === "customers") {
+      if (path[2] === "verification-link" && method === "POST") {
+        if (role !== "OWNER")
+          throw new HttpError(
+            403,
+            "Only the owner may issue verification links.",
+          );
+        const session = state.sessions.find((s) => s.id === body.session_id);
+        if (!session) throw new HttpError(404, "Conversation not found.");
+        const context = (await handleCustomerTool(
+          state,
+          "get_customer_context",
+          {},
+          session,
+          env,
+        )) as Record<string, unknown>;
+        if (context.customer_id !== path[1])
+          throw new HttpError(
+            404,
+            "Customer does not match this conversation.",
+          );
+        result = await issueCustomerVerificationChallenge(state, session, env);
+        status = 201;
+      } else result = handleCustomerMerchant(state, path, method, body, role);
+    } else if (
       path[0] === "orders" &&
       path.length === 3 &&
       path[2] === "customer-link" &&
@@ -1392,14 +1530,15 @@ export async function handleRequest(
     ) {
       let order = createOrder(merchantId);
       order.source = isDemo(env) ? "demo" : "voice";
+      const recognizedPhone = body.phone ? normalizePhone(body.phone) : null;
+      if (body.phone && !recognizedPhone)
+        throw new HttpError(
+          422,
+          "Use an international phone number beginning with +.",
+        );
       order.customer = {
         name: z.string().max(120).optional().parse(body.name) ?? null,
-        phone:
-          z
-            .string()
-            .regex(/^\+\d{8,15}$/)
-            .optional()
-            .parse(body.phone || undefined) ?? null,
+        phone: recognizedPhone,
       };
       order.external_reference = `RO-${1049 + state.orders.length - 14}`;
       replaceOrder(state, order);
@@ -1410,12 +1549,15 @@ export async function handleRequest(
       };
       const session: Session = {
         id: uid("session"),
+        ...(trustedTool && typeof body.request_id === "string"
+          ? { provider_conversation_id: body.request_id }
+          : {}),
         order_id: order.id,
         turns: [
           {
             id: uid("turn"),
             role: "assistant",
-            text: String(state.settings.agent.greeting),
+            text: `¡Hola! Gracias por llamar a ${state.merchant.name}. ¿Qué te gustaría pedir?`,
             created_at: new Date().toISOString(),
           },
         ],
@@ -1428,6 +1570,17 @@ export async function handleRequest(
         ...session,
         session_id: session.id,
         order: metadata(state, order),
+        customer_context: await handleCustomerTool(
+          state,
+          "get_customer_context",
+          {},
+          session,
+          env,
+        ),
+        language_policy: {
+          initial: "es-MX",
+          supported: ["es-MX", "en-US", "zh-CN"],
+        },
       };
       status = 201;
     } else if (
@@ -1620,6 +1773,7 @@ export async function handleRequest(
           sent.status.toUpperCase();
       }
       replaceOrder(state, order);
+      if (action === "complete") await queueCompletedReceipts(state, env);
       audit(
         state,
         "order.action",
@@ -2021,6 +2175,22 @@ export async function handleRequest(
       audit(state, "team.invited", "Invitation created", member.email);
     } else if (path[0] === "tools" && method === "POST") {
       const tool = path[1];
+      if (["claim_automation_jobs", "ack_automation_job"].includes(tool)) {
+        if (tool === "claim_automation_jobs")
+          await queueCompletedReceipts(state, env);
+        result = await handleAutomationTool(state, tool, body, env);
+        const saved = await repo.saveTrusted(
+          merchantId,
+          stored.revision,
+          state,
+        );
+        if (!saved)
+          throw new HttpError(
+            409,
+            "Another update just arrived. Please try again.",
+          );
+        return json(result);
+      }
       if (tool === "get_memory_context")
         return json({
           memories: retrieveMemories(state.memories, {
@@ -2082,6 +2252,53 @@ export async function handleRequest(
       const session = state.sessions.find((s) => s.id === body.session_id);
       if (!session)
         throw new HttpError(404, "Use a server-created session ID.");
+      let customerResult = await handleCustomerTool(
+        state,
+        tool,
+        body,
+        session,
+        env,
+      );
+      if (
+        tool === "verify_customer" &&
+        body.consent === true &&
+        (customerResult as Record<string, unknown>)?.verified !== true
+      ) {
+        customerResult = {
+          verification_required: true,
+          notification: await queueCustomerVerification(
+            state,
+            session,
+            true,
+            env,
+          ),
+          verified: false,
+        };
+      }
+      const automationResult =
+        customerResult === undefined
+          ? tool === "set_customer_followup_consent"
+            ? saveFollowupConsent(state, session, {
+                purpose: body.purpose,
+                consent: body.consent,
+                utterance: body.utterance,
+              })
+            : await handleAutomationTool(state, tool, body, env, session)
+          : undefined;
+      if (customerResult !== undefined || automationResult !== undefined) {
+        result = customerResult ?? automationResult;
+        const saved = await repo.saveTrusted(
+          merchantId,
+          stored.revision,
+          state,
+        );
+        if (!saved)
+          throw new HttpError(
+            409,
+            "Another update just arrived. Please try again.",
+          );
+        return json(result);
+      }
       if (tool === "get_order_state")
         return json(findOrder(state, session.order_id));
       if (tool === "customer_link") {

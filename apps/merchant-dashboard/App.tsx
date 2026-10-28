@@ -64,6 +64,7 @@ import { Configuration, Onboarding } from "./Configuration";
 import MenuImport from "./MenuImport";
 import VoiceCall from "./VoiceCall";
 import CustomerOrderLink from "./CustomerOrderLink";
+import Customers from "./Customers";
 import { confirmedOrders, inPeriod } from "./reporting";
 import {
   consumeSupabaseMagicLink,
@@ -77,6 +78,7 @@ const nav = [
       ["Overview", LayoutDashboard],
       ["Orders", ShoppingBag],
       ["Calls", Phone],
+      ["Customers", Users],
       ["Escalations", LifeBuoy],
       ["Language memory", BrainCircuit],
     ],
@@ -102,6 +104,7 @@ const allowedPages = (role: string) =>
           "Overview",
           "Orders",
           "Calls",
+          "Customers",
           "Escalations",
           "Language memory",
           "Menu",
@@ -110,6 +113,7 @@ const allowedPages = (role: string) =>
           "Overview",
           "Orders",
           "Calls",
+          "Customers",
           "Escalations",
           "Language memory",
           "Menu",
@@ -633,6 +637,7 @@ export default function MerchantApp() {
             </>
           ) : (
             <>
+              {page === "Customers" && <Customers role={data.user.role} />}
               {page === "Overview" && (
                 <Overview
                   data={data}

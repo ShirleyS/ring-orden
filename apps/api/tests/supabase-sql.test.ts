@@ -3,6 +3,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { seedTenant } from "../src/seed.ts";
 import type { Invitation, TenantState } from "../src/types.ts";
+import { createOrder } from "../../../packages/ring-orden-core/src/index.ts";
+import {
+  handleCustomerTool,
+  handleCustomerMerchant,
+} from "../src/customer-memory.ts";
+import { queueCustomerAutomation } from "../src/customer-automation.ts";
 
 const moduleName = "@electric-sql/pglite";
 const vectorModule = "@electric-sql/pglite/vector";
@@ -133,6 +139,84 @@ const accept = (hash: string, subject: string, email: string) =>
   });
 const memberships = (subject: string) =>
   rpc<Row[]>("ring_memberships", { p_subject: subject });
+
+test("existing SQL RPCs durably preserve customer memory and encrypted jobs with tenant and revision checks", async () => {
+  const tenant = "customer-sql-persistence";
+  const owner = "customer-sql-owner";
+  const payload = state(tenant, owner);
+  const order = createOrder(tenant);
+  order.customer = { name: "Ana", phone: "+525555550123" };
+  payload.orders.push(order);
+  payload.order_metadata[order.id] = {
+    pos_status: "DASHBOARD_ONLY",
+    notification_status: "PENDING",
+    demo: false,
+  };
+  const session = {
+    id: "customer-sql-session",
+    order_id: order.id,
+    turns: [],
+    status: "ACTIVE",
+    created_at: new Date().toISOString(),
+    pending_corrections: [],
+  };
+  payload.sessions.push(session);
+  const context = (await handleCustomerTool(
+    payload,
+    "get_customer_context",
+    {},
+    session,
+    {},
+  )) as { customer_id: string };
+  handleCustomerMerchant(
+    payload,
+    ["customers", context.customer_id, "preferences"],
+    "POST",
+    {
+      preference_key: "milk",
+      preference_value: "oat",
+      scope: "permanent",
+      confirmed: true,
+    },
+    "OWNER",
+  );
+  await queueCustomerAutomation(
+    payload,
+    { order_id: order.id, purpose: "recovery", consent: true },
+    {
+      AGENT_TOOL_SECRET: "synthetic-durable-sql-secret",
+      CUSTOMER_APP_ORIGIN: "https://order.example",
+    },
+  );
+  await create(tenant, owner, payload);
+  const reloaded = await load(tenant, owner);
+  assert.ok(reloaded);
+  assert.equal(reloaded.state.customer_memory!.preferences[0].value, "oat");
+  assert.ok(reloaded.state.customer_automation!.jobs[0].encrypted_link);
+  assert.equal(
+    JSON.stringify(reloaded.state.customer_automation).includes(
+      "https://order.example",
+    ),
+    false,
+  );
+  assert.equal(await load(tenant, "another-owner"), null);
+  assert.equal(
+    await save(tenant, "another-owner", reloaded.revision, reloaded.state),
+    false,
+  );
+  assert.equal(
+    await save(tenant, owner, reloaded.revision + 1, reloaded.state),
+    false,
+  );
+  assert.equal(
+    await save(tenant, owner, reloaded.revision, reloaded.state),
+    true,
+  );
+  await assert.rejects(
+    () => asRole("anon", "SELECT public.ring_load_trusted_state($1)", [tenant]),
+    /permission denied/i,
+  );
+});
 
 test("all Supabase migrations compile, including vector retrieval and publication", async () => {
   const functions = await database.query(

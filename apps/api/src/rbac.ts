@@ -7,6 +7,18 @@ export function guardMerchantRoute(
   body?: Record<string, unknown>,
 ) {
   if (role === "OWNER") return;
+  if (path[0] === "customers") {
+    if (
+      role === "MANAGER" &&
+      path[2] !== "billing" &&
+      path[2] !== "verification-link"
+    )
+      return;
+    throw new HttpError(
+      403,
+      "Customer access requires an authorized owner or manager.",
+    );
+  }
   if (path[2] === "customer-link")
     throw new HttpError(403, "Only the owner can manage customer order links.");
   const route = path[0];

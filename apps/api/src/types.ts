@@ -4,6 +4,8 @@ import type {
   Operation,
 } from "../../../packages/ring-orden-core/src/index.ts";
 import type { CorrectionMemory } from "../../../packages/ring-orden-memory/src/index.ts";
+import type { CustomerMemoryState } from "./customer-memory.ts";
+import type { AutomationState } from "./customer-automation.ts";
 export type JsonObject = Record<string, unknown>;
 export interface Turn {
   id: string;
@@ -16,6 +18,7 @@ export interface Turn {
   memories_used?: string[];
 }
 export interface Session {
+  provider_conversation_id?: string;
   id: string;
   order_id: string;
   turns: Turn[];
@@ -60,6 +63,24 @@ export interface Escalation {
   priority: string;
 }
 export interface TenantState {
+  followup_consents?: Record<
+    string,
+    Partial<
+      Record<
+        "receipt" | "recovery",
+        {
+          session_id: string;
+          purpose: "receipt" | "recovery";
+          consent: boolean;
+          recorded_at: string;
+          status?: string;
+        }
+      >
+    >
+  >;
+  ended_conversations?: string[];
+  customer_memory?: CustomerMemoryState;
+  customer_automation?: AutomationState;
   merchant: {
     id: string;
     name: string;
