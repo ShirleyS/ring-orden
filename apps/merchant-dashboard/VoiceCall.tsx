@@ -1,17 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  AudioLines,
-  Loader2,
-  Mic,
-  MicOff,
-  Phone,
-  PhoneOff,
-  ShieldCheck,
-  X,
-} from "lucide-react";
+import { Mic, MicOff, Phone, PhoneOff, ShieldCheck, X } from "lucide-react";
 import { api } from "./types";
+import { BrowserPhoneFrame } from "./BrowserPhoneFrame";
+import { withDeadline } from "../../packages/ring-orden-connect/src/browser-phone";
 
 type Phase =
   | "idle"
@@ -24,8 +17,9 @@ type VoiceSession = {
   endSession: () => Promise<void>;
   getId: () => string;
   setMicMuted: (muted: boolean) => void;
+  setVolume?: (options: { volume: number }) => void;
+  sendUserMessage?: (text: string) => void;
 };
-type TranscriptLine = { id: string; role: "user" | "assistant"; text: string };
 export interface VoiceCallProps {
   onClose: () => void;
   notify: (message: string) => void;
@@ -38,16 +32,18 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
   const [error, setError] = useState("");
   const [muted, setMuted] = useState(false);
   const [conversationId, setConversationId] = useState("");
-  const [transcript, setTranscript] = useState<TranscriptLine[]>([]);
+  const [stage, setStage] = useState("Waiting for Start call");
+  const [agentId, setAgentId] = useState("");
   const mounted = useRef(false),
     generation = useRef(0),
     starting = useRef(false);
   const session = useRef<VoiceSession | null>(null),
     request = useRef<AbortController | null>(null),
     permissionStream = useRef<MediaStream | null>(null);
-  const endOfTranscript = useRef<HTMLDivElement>(null);
   const callbacks = useRef({ notify, onUpdate, onClose });
-  callbacks.current = { notify, onUpdate, onClose };
+  useEffect(() => {
+    callbacks.current = { notify, onUpdate, onClose };
+  }, [notify, onUpdate, onClose]);
   const releasePermissionStream = useCallback(() => {
     permissionStream.current?.getTracks().forEach((track) => track.stop());
     permissionStream.current = null;
@@ -68,6 +64,7 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
     session.current = null;
     if (mounted.current) {
       setPhase("ended");
+      setStage("Call ended");
       setMuted(false);
     }
     try {
@@ -94,6 +91,8 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
     document.addEventListener("keydown", escape);
     return () => {
       mounted.current = false;
+      // This generation counter invalidates asynchronous work during cleanup.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
       generation.current++;
       starting.current = false;
       request.current?.abort();
@@ -106,12 +105,6 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
       document.removeEventListener("keydown", escape);
     };
   }, [close, releasePermissionStream]);
-  useEffect(() => {
-    endOfTranscript.current?.scrollIntoView({
-      behavior: "smooth",
-      block: "nearest",
-    });
-  }, [transcript]);
 
   const start = async () => {
     if (starting.current || session.current) return;
@@ -120,7 +113,8 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
     setPhase("connecting");
     setError("");
     setMuted(false);
-    setTranscript([]);
+    setStage("Requesting ElevenLabs connection (up to 15 seconds)");
+    setAgentId("");
     setConversationId("");
     let connectTimer: ReturnType<typeof setTimeout> | undefined;
     let signedTimer: ReturnType<typeof setTimeout> | undefined;
@@ -136,15 +130,20 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
       request.current = controller;
       signedTimer = setTimeout(() => controller.abort(), 15000);
       // Fetch configuration first: an unconfigured workspace never prompts for a microphone.
-      const payload = await api<{
-        signed_url?: string;
-        agent_id?: string;
-        error?: string | { message?: string };
-        message?: string;
-      }>("/voice/signed-url", "POST", {}, controller.signal);
+      const payload = await withDeadline(
+        api<{
+          signed_url?: string;
+          agent_id?: string;
+          error?: string | { message?: string };
+          message?: string;
+        }>("/voice/signed-url", "POST", {}, controller.signal),
+        15000,
+        "The ElevenLabs connection request timed out. Please try again.",
+      );
       clearTimeout(signedTimer);
       signedTimer = undefined;
       if (!current()) return;
+      setAgentId(payload.agent_id || "");
       if (!payload.signed_url && !payload.agent_id)
         throw new Error(
           "The voice provider did not return a conversation connection.",
@@ -161,17 +160,49 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
           throw new Error(
             "The voice provider returned an invalid conversation URL.",
           );
+        const signedAgentId = signed.searchParams.get("agent_id");
+        if (
+          signedAgentId &&
+          /^(agent_|seng_)[a-zA-Z0-9_-]+$/.test(signedAgentId)
+        )
+          setAgentId(signedAgentId);
       } else if (!/^(agent_|seng_)[a-zA-Z0-9_-]+$/.test(payload.agent_id!)) {
         throw new Error("The voice provider returned an invalid agent ID.");
       }
       // This method runs only in response to the user's explicit Start call action.
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      setStage("Waiting for microphone permission (up to 30 seconds)");
+      let permissionExpired = false;
+      const pendingPermission = navigator.mediaDevices.getUserMedia({
+        audio: true,
+      });
+      void pendingPermission
+        .then((lateStream) => {
+          if (permissionExpired || !current())
+            lateStream.getTracks().forEach((track) => track.stop());
+        })
+        .catch(() => {});
+      let stream: MediaStream;
+      try {
+        stream = await withDeadline(
+          pendingPermission,
+          30000,
+          "Microphone permission timed out. Allow the microphone and try again.",
+        );
+      } catch (cause) {
+        permissionExpired = true;
+        throw cause;
+      }
       if (!current()) {
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
       permissionStream.current = stream;
-      const { Conversation } = await import("@elevenlabs/client");
+      setStage("Loading ElevenLabs audio client (up to 20 seconds)");
+      const { Conversation } = await withDeadline(
+        import("@elevenlabs/client"),
+        20000,
+        "The ElevenLabs audio client took too long to load. Please try again.",
+      );
       if (!current()) return;
       const sessionOptions = {
         connectionType: "websocket",
@@ -181,35 +212,19 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
           else void connected.endSession().catch(() => {});
         },
         onConnect: ({ conversationId: id }) => {
-          if (current()) {
+          if (current() && !failed && !finished) {
             setConversationId(id);
             setPhase("listening");
+            setStage("Connected to ElevenLabs agent");
           }
         },
         onModeChange: ({ mode }) => {
           if (current() && !failed && !finished)
             setPhase(mode === "speaking" ? "speaking" : "listening");
         },
-        onMessage: (message: {
-          message?: string;
-          source?: string;
-          role?: string;
-        }) => {
-          if (!current() || !message.message?.trim()) return;
-          const text = message.message;
-          const role: TranscriptLine["role"] =
-            message.source === "user" || message.role === "user"
-              ? "user"
-              : "assistant";
-          setTranscript((lines) => {
-            const last = lines.at(-1);
-            if (last?.role === role && last.text === text) return lines;
-            return [
-              ...lines.slice(-59),
-              { id: crypto.randomUUID(), role, text },
-            ];
-          });
-          refresh();
+        // Voice transcripts stay out of the caller's message history.
+        onMessage: () => {
+          if (current()) refresh();
         },
         onDisconnect: (details) => {
           finished = true;
@@ -220,11 +235,15 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
             if (details.reason === "error") {
               failed = true;
               setPhase("error");
+              setStage("ElevenLabs connection interrupted");
               setError(
                 details.message ||
                   "The voice connection was interrupted. Please try again.",
               );
-            } else if (!failed) setPhase("ended");
+            } else if (!failed) {
+              setPhase("ended");
+              setStage("Call ended");
+            }
             releasePermissionStream();
             refresh();
           }
@@ -233,6 +252,7 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
           failed = true;
           if (current()) {
             setPhase("error");
+            setStage("ElevenLabs connection error");
             setError(
               message ||
                 "The voice connection was interrupted. Please try again.",
@@ -245,6 +265,7 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
           }
         },
       } satisfies Partial<Parameters<typeof Conversation.startSession>[0]>;
+      setStage("Connecting ElevenLabs audio session (up to 25 seconds)");
       const pending = payload.signed_url
         ? Conversation.startSession({
             signedUrl: payload.signed_url,
@@ -284,10 +305,14 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
       }
       session.current = connected;
       setConversationId(connected.getId());
+      setStage("Connected to ElevenLabs agent");
     } catch (cause) {
       if (!current()) return;
       generation.current++;
       failed = true;
+      const failedSession = session.current;
+      session.current = null;
+      void failedSession?.endSession().catch(() => {});
       const problem =
         cause instanceof DOMException && cause.name === "NotAllowedError"
           ? "Microphone access was declined. Allow the microphone in your browser to start a voice call."
@@ -298,13 +323,17 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
               : cause instanceof Error
                 ? cause.message
                 : "The voice call could not start. Please try again.";
+      setStage((value) => `Failed: ${value}`);
       setError(problem);
       setPhase("error");
       callbacks.current.notify(problem);
     } finally {
       if (signedTimer) clearTimeout(signedTimer);
       if (connectTimer) clearTimeout(connectTimer);
-      if (generation.current === attempt || failed) {
+      if (
+        generation.current === attempt ||
+        (failed && generation.current === attempt + 1)
+      ) {
         starting.current = false;
         request.current = null;
         releasePermissionStream();
@@ -368,53 +397,55 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
           className="modal-body"
           style={{ display: "grid", gap: 20, padding: 24 }}
         >
-          <div style={{ textAlign: "center", padding: "12px 0 4px" }}>
-            <div
-              aria-hidden="true"
-              style={{
-                width: 92,
-                height: 92,
-                margin: "0 auto 18px",
-                display: "grid",
-                placeItems: "center",
-                borderRadius: "50%",
-                color: "#fff",
-                background: active
-                  ? "radial-gradient(circle at 35% 30%,#ca8e96,#8c4357 66%,#623446)"
-                  : "radial-gradient(circle at 35% 30%,#9eaa94,#526549)",
-                boxShadow: active
-                  ? "0 0 0 9px #f5e9eb,0 0 0 18px #fbf4f4"
-                  : "0 0 0 9px #eef1e9",
-              }}
-            >
-              {connecting ? (
-                <Loader2 className="spin" size={34} />
-              ) : phase === "speaking" ? (
-                <AudioLines size={36} />
-              ) : muted ? (
-                <MicOff size={32} />
-              ) : (
-                <Mic size={32} />
-              )}
-            </div>
-            <p
-              role="status"
-              aria-live="polite"
-              style={{ fontWeight: 600, fontSize: 17, marginBottom: 9 }}
-            >
-              {status}
-            </p>
-            <p
-              className="muted"
-              style={{ lineHeight: 1.7, maxWidth: 430, margin: "0 auto" }}
-            >
-              {active
-                ? "Speak naturally. Interrupt, change your mind, and ask a clarification."
-                : phase === "ended"
-                  ? "Your conversation has ended. You can make another call."
-                  : "Start call asks for microphone access. Your agent’s server tools save and validate each order."}
-            </p>
-          </div>
+          <BrowserPhoneFrame
+            phase={phase}
+            error={error}
+            stage={stage}
+            muted={muted}
+            onStart={() => {
+              void start();
+            }}
+            onStop={() => {
+              void stop();
+            }}
+            onMute={(next) => {
+              if (session.current) {
+                try {
+                  session.current.setMicMuted(next);
+                  setMuted(next);
+                } catch {
+                  callbacks.current.notify(
+                    "The microphone could not be changed. Please try again.",
+                  );
+                }
+              }
+            }}
+            onVolume={(volume) => {
+              try {
+                session.current?.setVolume?.({ volume });
+              } catch {
+                callbacks.current.notify(
+                  "The call volume could not be changed. Please try again.",
+                );
+              }
+            }}
+            onMessage={(text) => {
+              if (
+                !(phase === "listening" || phase === "speaking") ||
+                !session.current?.sendUserMessage
+              )
+                return false;
+              session.current.sendUserMessage(text);
+              return true;
+            }}
+          />
+          <p
+            role="status"
+            aria-live="polite"
+            style={{ margin: 0, textAlign: "center" }}
+          >
+            {status}
+          </p>
           {error && (
             <div
               className="info-banner"
@@ -425,36 +456,6 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
               <p>{error}</p>
             </div>
           )}
-          {transcript.length > 0 && (
-            <div
-              aria-label="Live voice transcript"
-              aria-live="polite"
-              style={{
-                maxHeight: 270,
-                overflowY: "auto",
-                display: "grid",
-                gap: 13,
-                padding: "14px 2px",
-                borderTop: "1px solid #e7e9e2",
-              }}
-            >
-              {transcript.map((line) => (
-                <div
-                  key={line.id}
-                  className={
-                    "chat-message " +
-                    (line.role === "user" ? "user" : "assistant")
-                  }
-                >
-                  <small style={{ display: "block", marginBottom: 5 }}>
-                    {line.role === "user" ? "You" : "Your agent"}
-                  </small>
-                  <p>{line.text}</p>
-                </div>
-              ))}
-              <div ref={endOfTranscript} />
-            </div>
-          )}
           {!active && !connecting && (
             <div className="info-banner">
               <ShieldCheck size={18} />
@@ -463,6 +464,14 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
                 stay under Ring Orden’s transaction rules.
               </p>
             </div>
+          )}
+          {agentId && (
+            <p
+              className="muted"
+              style={{ fontSize: 11, overflowWrap: "anywhere" }}
+            >
+              ElevenLabs agent: {agentId}
+            </p>
           )}
           {conversationId && (
             <p

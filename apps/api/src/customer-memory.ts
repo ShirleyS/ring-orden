@@ -166,11 +166,40 @@ function customerForPhone(
       409,
       "Ambiguous customer contact requires staff review.",
     );
-  if (matches[0]) return matches[0];
+  const existing = matches[0];
+  if (existing?.name) return existing;
+  // Names remain recognition candidates. Fill an unset display name from an
+  // own canonical order, including names supplied after a call was created.
+  const candidateName =
+    (
+      name?.trim() ||
+      state.orders
+        .find(
+          (order) =>
+            order.merchant_id === state.merchant.id &&
+            normalizePhone(order.customer.phone) === phone &&
+            order.customer.name?.trim(),
+        )
+        ?.customer.name?.trim() ||
+      null
+    )?.slice(0, 160) ?? null;
+  if (existing) {
+    if (candidateName) {
+      existing.name = candidateName;
+      existing.updated_at = now();
+      event(
+        state,
+        existing.id,
+        "customer.name_recorded",
+        "Display name recorded from an own canonical order; identity remains unverified.",
+      );
+    }
+    return existing;
+  }
   const customer: CustomerRecord = {
     id: id("customer"),
     merchant_id: state.merchant.id,
-    name: name?.slice(0, 160) ?? null,
+    name: candidateName,
     phone,
     language: "es-MX",
     whatsapp_consent: false,
@@ -679,6 +708,7 @@ export async function handleCustomerTool(
       ? {
           recognized: true,
           customer_id: customer.id,
+          display_name: customer.name,
           verified: verified(state, session, customer),
           preferred_language: customer.language,
           verification_required: !verified(state, session, customer),

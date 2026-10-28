@@ -21,7 +21,7 @@ const definitions = [
   {
     name: "create_session",
     description:
-      "Start one new order conversation after the caller says they want to order. Call this once per conversation before any order changes, and reuse its returned session ID for every later order tool.",
+      "Start one new empty order after the caller says they want to order. Never copy a previous order or favorite merely from a caller-ID match. Ask the caller to confirm any saved display_name before using it. Call this once per conversation before changes and reuse its returned session ID for every later order tool.",
     body: {
       type: "object",
       properties: {
