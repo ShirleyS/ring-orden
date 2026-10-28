@@ -71,6 +71,11 @@ import {
   requestSupabaseMagicLink,
   supabaseAuthConfigured,
 } from "./supabase-auth";
+import {
+  mojoAuthConfigured,
+  signInWithMojoAuth,
+  finishMojoAuthSignIn,
+} from "./mojoauth-login";
 const nav = [
   {
     group: "WORKSPACE",
@@ -242,6 +247,7 @@ export default function MerchantApp() {
     [notifications, setNotifications] = useState(false),
     [range, setRange] = useState("Today");
   const [loginEmail, setLoginEmail] = useState("");
+  const [mojoAuthReady, setMojoAuthReady] = useState<boolean | null>(null);
   const [loginSent, setLoginSent] = useState(false);
   const [loginBusy, setLoginBusy] = useState(false);
   const [loginError, setLoginError] = useState("");
@@ -263,6 +269,18 @@ export default function MerchantApp() {
     return () => clearInterval(t);
   }, [load]);
   useEffect(() => {
+    mojoAuthConfigured()
+      .then(setMojoAuthReady)
+      .catch((e) => setLoginError((e as Error).message));
+    finishMojoAuthSignIn()
+      .then((completed) => {
+        if (completed) {
+          if (new URLSearchParams(window.location.search).has("invite"))
+            setModal("invite");
+          load();
+        }
+      })
+      .catch((e) => setLoginError((e as Error).message));
     const callbackError = consumeSupabaseMagicLink();
     if (callbackError) setLoginError(callbackError);
     else if (!window.location.hash) load();
@@ -360,42 +378,68 @@ export default function MerchantApp() {
     return (
       <div className="loading-page">
         <Logo />
-        {error.toLowerCase().includes("sign in") && supabaseAuthConfigured ? (
+        {error.toLowerCase().includes("sign in") &&
+        (mojoAuthReady || supabaseAuthConfigured) ? (
           <>
             <h2>Sign in to Ring Orden</h2>
             <p>
-              {loginSent
-                ? `Check ${loginEmail} for your secure sign-in link.`
-                : "Enter your email and we’ll send you a secure sign-in link."}
+              {mojoAuthReady
+                ? "Continue to sign in securely with your email."
+                : loginSent
+                  ? `Check ${loginEmail} for your secure sign-in link.`
+                  : "Enter your email and we’ll send you a secure sign-in link."}
             </p>
-            {!loginSent && (
-              <form
-                onSubmit={sendSignInLink}
-                style={{
-                  display: "grid",
-                  gap: 12,
-                  width: "min(360px, calc(100vw - 48px))",
+            {mojoAuthReady ? (
+              <button
+                className="primary"
+                disabled={loginBusy}
+                onClick={async () => {
+                  setLoginBusy(true);
+                  setLoginError("");
+                  try {
+                    await signInWithMojoAuth();
+                  } catch (e) {
+                    setLoginError((e as Error).message);
+                    setLoginBusy(false);
+                  }
                 }}
               >
-                <input
-                  aria-label="Email address"
-                  autoComplete="email"
-                  type="email"
-                  required
-                  value={loginEmail}
-                  onChange={(event) => setLoginEmail(event.target.value)}
-                  placeholder="you@example.com"
+                {loginBusy ? "Opening sign-in…" : "Continue with MojoAuth"}
+              </button>
+            ) : (
+              !loginSent && (
+                <form
+                  onSubmit={sendSignInLink}
                   style={{
-                    border: "1px solid #d9d4cb",
-                    borderRadius: 10,
-                    padding: "13px 15px",
-                    font: "inherit",
+                    display: "grid",
+                    gap: 12,
+                    width: "min(360px, calc(100vw - 48px))",
                   }}
-                />
-                <button className="primary" type="submit" disabled={loginBusy}>
-                  {loginBusy ? "Sending link…" : "Email me a sign-in link"}
-                </button>
-              </form>
+                >
+                  <input
+                    aria-label="Email address"
+                    autoComplete="email"
+                    type="email"
+                    required
+                    value={loginEmail}
+                    onChange={(event) => setLoginEmail(event.target.value)}
+                    placeholder="you@example.com"
+                    style={{
+                      border: "1px solid #d9d4cb",
+                      borderRadius: 10,
+                      padding: "13px 15px",
+                      font: "inherit",
+                    }}
+                  />
+                  <button
+                    className="primary"
+                    type="submit"
+                    disabled={loginBusy}
+                  >
+                    {loginBusy ? "Sending link…" : "Email me a sign-in link"}
+                  </button>
+                </form>
+              )
             )}
             {loginError && (
               <p role="alert" style={{ color: "#923c4e" }}>

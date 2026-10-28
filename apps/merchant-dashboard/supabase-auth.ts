@@ -12,6 +12,10 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, "");
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 const SESSION_KEY = "ring-orden-supabase-session";
 
+export function clearSupabaseSession() {
+  localStorage.removeItem(SESSION_KEY);
+}
+
 type BrowserSession = {
   access_token: string;
   refresh_token: string;

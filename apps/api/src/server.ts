@@ -36,6 +36,7 @@ import {
   validateMutationOrigin,
   verifyMojoToken,
   makeSessionCookie,
+  linkMojoIdentity,
   sha256Hex,
   newInvitationToken,
   configuredAgentSecret,
@@ -1215,6 +1216,40 @@ export async function handleRequest(
         status: 204,
         headers: { Allow: "GET, POST, PATCH, DELETE, OPTIONS" },
       });
+    if (path[0] === "auth") validateMutationOrigin(request);
+    if (path[0] === "auth" && path[1] === "config" && method === "GET") {
+      const configured = Boolean(
+        env.MOJOAUTH_ISSUER &&
+          env.MOJOAUTH_AUDIENCE &&
+          env.MOJOAUTH_JWKS_URL &&
+          env.SESSION_SECRET,
+      );
+      return json(
+        configured
+          ? {
+              provider: "mojoauth",
+              issuer: env.MOJOAUTH_ISSUER,
+              clientId: env.MOJOAUTH_AUDIENCE,
+            }
+          : { provider: null },
+      );
+    }
+    if (path[0] === "auth" && path[1] === "session" && method === "POST") {
+      const body = await bodyOf(request);
+      const verified = await verifyMojoToken(
+        z.string().min(20).parse(body.access_token),
+        env,
+      );
+      const user = await linkMojoIdentity(verified, env);
+      return json({ user }, 200, {
+        "Set-Cookie": await makeSessionCookie(user, env),
+      });
+    }
+    if (path[0] === "auth" && path[1] === "logout")
+      return json({ ok: true }, 200, {
+        "Set-Cookie":
+          "ring_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0",
+      });
     if (!repository) await prepareSupabaseMigration(env);
     const repo = repository ?? repositoryFor(env);
     if (path[0] === "webhooks" && path[1] === "stripe")
@@ -1227,21 +1262,6 @@ export async function handleRequest(
     )
       return await handleElevenLabsEvent(request, env, repo);
     validateMutationOrigin(request);
-    if (path[0] === "auth" && path[1] === "session" && method === "POST") {
-      const body = await bodyOf(request);
-      const user = await verifyMojoToken(
-        z.string().min(20).parse(body.access_token),
-        env,
-      );
-      return json({ user }, 200, {
-        "Set-Cookie": await makeSessionCookie(user, env),
-      });
-    }
-    if (path[0] === "auth" && path[1] === "logout")
-      return json({ ok: true }, 200, {
-        "Set-Cookie":
-          "ring_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0",
-      });
     let trustedTool = false;
     let identity: Identity;
     let merchantId: string;
