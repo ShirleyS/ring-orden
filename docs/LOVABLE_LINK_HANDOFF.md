@@ -7,7 +7,9 @@ RingOrden creates the secure links. The existing Lovable app displays or distrib
 
 ## Link destinations
 
-Configure `CUSTOMER_APP_ORIGIN` on both RingOrden backends as the exact HTTPS origin of the existing Lovable customer app. This must be the working app URL, not the lovable.dev editor URL. The current published/preview origin still needs confirmation from the private project.
+The user published the existing customer app at `https://ringorden.lovable.app`. Anonymous HTTP access returned 200 on 2026-10-28. `CUSTOMER_APP_ORIGIN` is saved as that exact origin on both RingOrden backends and activated by fresh deployments. Live order, billing, receipt and verification preflights returned 204 for that origin and 403 for an unrelated origin; invalid order/billing/receipt capabilities returned 401. The private merchant app still returns 401 anonymously. The private id-preview address is not the customer destination.
+
+The published frontend inspected on that date does not yet configure `VITE_RING_ORDEN_API_ORIGIN`. Its existing receipt client sends `PUT /api/customer/billing` with `{revision, details}`, while the implemented capability endpoint requires POST with confirmed fiscal fields. It also has `/receipt` but no `/customer` route. Do not claim the forms are connected until these frontend differences are corrected and verified. See LOVABLE_LIVE_CONNECTION.md for the narrow update prompt.
 
 | Purpose            | Link shape                                          | Customer action                                      | Lifetime   |
 | ------------------ | --------------------------------------------------- | ---------------------------------------------------- | ---------- |
