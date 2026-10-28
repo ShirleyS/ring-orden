@@ -33,6 +33,41 @@ test("configured MojoAuth prevents local demo bypass", async () => {
     /sign in/i,
   );
 });
+test("Supabase bearer token is verified by Auth before creating identity", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = "";
+  try {
+    globalThis.fetch = async (input, init) => {
+      requestedUrl = String(input);
+      assert.equal(
+        new Headers(init?.headers).get("Authorization"),
+        "Bearer valid-access-token",
+      );
+      return Response.json({
+        id: "4df9e52a-3bee-4adf-b1e7-8957dc5dc0b9",
+        email: "owner@example.com",
+        email_confirmed_at: "2026-10-28T00:00:00Z",
+        user_metadata: { full_name: "Owner" },
+      });
+    };
+    const identity = await identityFromRequest(
+      new Request("https://ring.test/api/bootstrap", {
+        headers: { Authorization: "Bearer valid-access-token" },
+      }),
+      {
+        SUPABASE_URL: "https://project.supabase.co",
+        SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test",
+      },
+    );
+    assert.equal(requestedUrl, "https://project.supabase.co/auth/v1/user");
+    assert.equal(identity.id, "supabase:4df9e52a-3bee-4adf-b1e7-8957dc5dc0b9");
+    assert.equal(identity.email, "owner@example.com");
+    assert.equal(identity.name, "Owner");
+    assert.equal(identity.provider, "supabase");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 test("tenant ID is stable and differs by authenticated owner", async () => {
   assert.equal(await tenantIdFor("alice"), await tenantIdFor("alice"));
   assert.notEqual(await tenantIdFor("alice"), await tenantIdFor("bob"));

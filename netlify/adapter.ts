@@ -17,7 +17,8 @@ export function adaptNetlifyRequest(
   // Trust that platform-supplied identity instead of rechecking its expiry.
   if (user?.id) {
     headers.set("oai-authenticated-user-id", "netlify:" + user.id);
-    if (user.email) headers.set("oai-authenticated-user-email", user.email);
+    if (user?.email)
+      headers.set("oai-authenticated-user-email", user.email);
     env.TRUST_SITES_HEADERS = "true";
   }
   return { request: new Request(request, { headers }), env };

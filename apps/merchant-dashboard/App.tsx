@@ -64,6 +64,11 @@ import { Configuration, Onboarding } from "./Configuration";
 import MenuImport from "./MenuImport";
 import VoiceCall from "./VoiceCall";
 import { confirmedOrders, inPeriod } from "./reporting";
+import {
+  consumeSupabaseMagicLink,
+  requestSupabaseMagicLink,
+  supabaseAuthConfigured,
+} from "./supabase-auth";
 const nav = [
   {
     group: "WORKSPACE",
@@ -231,6 +236,10 @@ export default function MerchantApp() {
     [sidebar, setSidebar] = useState(false),
     [notifications, setNotifications] = useState(false),
     [range, setRange] = useState("Today");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginSent, setLoginSent] = useState(false);
+  const [loginBusy, setLoginBusy] = useState(false);
+  const [loginError, setLoginError] = useState("");
   const notify = useCallback((s: string) => {
     setToast(s);
     setTimeout(() => setToast(""), 5000);
@@ -247,6 +256,11 @@ export default function MerchantApp() {
     load();
     const t = setInterval(load, 8000);
     return () => clearInterval(t);
+  }, [load]);
+  useEffect(() => {
+    const callbackError = consumeSupabaseMagicLink();
+    if (callbackError) setLoginError(callbackError);
+    else if (!window.location.hash) load();
   }, [load]);
   useEffect(() => {
     const f = (e: KeyboardEvent) => {
@@ -285,6 +299,19 @@ export default function MerchantApp() {
       return null;
     } finally {
       setBusy(false);
+    }
+  };
+  const sendSignInLink = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setLoginBusy(true);
+    setLoginError("");
+    try {
+      await requestSupabaseMagicLink(loginEmail);
+      setLoginSent(true);
+    } catch (e) {
+      setLoginError((e as Error).message);
+    } finally {
+      setLoginBusy(false);
     }
   };
   const exportOrders = () => {
@@ -328,14 +355,72 @@ export default function MerchantApp() {
     return (
       <div className="loading-page">
         <Logo />
-        <Loader2 className="spin" />
-        <h2>
-          {error
-            ? "Your workspace needs a moment"
-            : "Getting your counter ready…"}
-        </h2>
-        <p>{error || "Loading your orders, menu, and conversations."}</p>
-        {error && (
+        {error.toLowerCase().includes("sign in") && supabaseAuthConfigured ? (
+          <>
+            <h2>Sign in to Ring Orden</h2>
+            <p>
+              {loginSent
+                ? `Check ${loginEmail} for your secure sign-in link.`
+                : "Enter your email and we’ll send you a secure sign-in link."}
+            </p>
+            {!loginSent && (
+              <form
+                onSubmit={sendSignInLink}
+                style={{
+                  display: "grid",
+                  gap: 12,
+                  width: "min(360px, calc(100vw - 48px))",
+                }}
+              >
+                <input
+                  aria-label="Email address"
+                  autoComplete="email"
+                  type="email"
+                  required
+                  value={loginEmail}
+                  onChange={(event) => setLoginEmail(event.target.value)}
+                  placeholder="you@example.com"
+                  style={{
+                    border: "1px solid #d9d4cb",
+                    borderRadius: 10,
+                    padding: "13px 15px",
+                    font: "inherit",
+                  }}
+                />
+                <button className="primary" type="submit" disabled={loginBusy}>
+                  {loginBusy ? "Sending link…" : "Email me a sign-in link"}
+                </button>
+              </form>
+            )}
+            {loginError && (
+              <p role="alert" style={{ color: "#923c4e" }}>
+                {loginError}
+              </p>
+            )}
+            {loginSent && (
+              <button
+                className="primary"
+                onClick={() => {
+                  setLoginSent(false);
+                  setLoginError("");
+                }}
+              >
+                Use a different email
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+            <Loader2 className="spin" />
+            <h2>
+              {error
+                ? "Your workspace needs a moment"
+                : "Getting your counter ready…"}
+            </h2>
+            <p>{error || "Loading your orders, menu, and conversations."}</p>
+          </>
+        )}
+        {error && !error.toLowerCase().includes("sign in") && (
           <button className="primary" onClick={load}>
             Try again
           </button>

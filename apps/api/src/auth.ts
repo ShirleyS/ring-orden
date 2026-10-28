@@ -17,6 +17,7 @@ export interface RuntimeEnv {
   TWILIO_WHATSAPP_TEMPLATE_SID?: string;
   ELEVENLABS_API_KEY?: string;
   ELEVENLABS_AGENT_ID?: string;
+  ELEVENLABS_AGENT_PUBLIC?: string;
   AGENT_TOOL_SECRET?: string;
   AGENT_MERCHANT_ID?: string;
   SQUARE_ACCESS_TOKEN?: string;
@@ -26,6 +27,7 @@ export interface RuntimeEnv {
   N8N_WEBHOOK_SECRET?: string;
   APP_ORIGIN?: string;
   SUPABASE_URL?: string;
+  SUPABASE_PUBLISHABLE_KEY?: string;
   SUPABASE_SERVER_SECRET?: string;
   SUPABASE_MIGRATE_D1?: string;
   [key: string]: unknown;
@@ -34,7 +36,7 @@ export interface Identity {
   id: string;
   email: string;
   name: string;
-  provider: "sites" | "mojoauth" | "local-demo";
+  provider: "sites" | "mojoauth" | "supabase" | "local-demo";
   email_verified?: boolean;
 }
 export class HttpError extends Error {
@@ -192,6 +194,14 @@ export async function identityFromRequest(
     }
   }
   const bearer = request.headers.get("authorization");
+  if (bearer?.startsWith("Bearer ") && env.SUPABASE_URL) {
+    if (!env.SUPABASE_PUBLISHABLE_KEY)
+      throw new HttpError(503, "Supabase sign-in is not configured.");
+    const token = bearer.slice(7).trim();
+    if (!token || token.length > 8192)
+      throw new HttpError(401, "Your sign in expired or could not be verified.");
+    return verifySupabaseToken(token, env);
+  }
   if (bearer?.startsWith("Bearer ") && env.MOJOAUTH_JWKS_URL)
     return verifyMojoToken(bearer.slice(7), env);
   const hostname = new URL(request.url).hostname.toLowerCase();
@@ -234,6 +244,64 @@ export async function identityFromRequest(
       email_verified: true,
     };
   throw new HttpError(401, "Please sign in to access your merchant workspace.");
+}
+
+const supabaseIdentityCache = new Map<
+  string,
+  { identity: Identity; expiresAt: number }
+>();
+export async function verifySupabaseToken(
+  token: string,
+  env: RuntimeEnv,
+): Promise<Identity> {
+  const cached = supabaseIdentityCache.get(token);
+  if (cached && cached.expiresAt > Date.now()) return cached.identity;
+  if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY)
+    throw new HttpError(503, "Supabase sign-in is not configured.");
+  let base: URL;
+  try {
+    base = new URL(env.SUPABASE_URL);
+  } catch {
+    throw new HttpError(503, "Supabase URL is invalid.");
+  }
+  if (base.protocol !== "https:")
+    throw new HttpError(503, "Supabase URL must use HTTPS.");
+  let response: Response;
+  try {
+    response = await fetch(new URL("/auth/v1/user", base), {
+      headers: {
+        apikey: env.SUPABASE_PUBLISHABLE_KEY,
+        authorization: `Bearer ${token}`,
+      },
+      signal: AbortSignal.timeout(7000),
+    });
+  } catch {
+    throw new HttpError(503, "Supabase sign-in could not be reached.");
+  }
+  if (!response.ok)
+    throw new HttpError(401, "Your sign in expired or could not be verified.");
+  const user = (await response.json()) as Record<string, unknown>;
+  if (typeof user.id !== "string" || typeof user.email !== "string")
+    throw new HttpError(401, "Your sign in expired or could not be verified.");
+  const identity: Identity = {
+    id: "supabase:" + user.id,
+    email: user.email,
+    name:
+      (typeof user.user_metadata === "object" &&
+      user.user_metadata !== null &&
+      typeof (user.user_metadata as Record<string, unknown>).full_name ===
+        "string"
+        ? String((user.user_metadata as Record<string, unknown>).full_name)
+        : user.email.split("@")[0]) || "Merchant",
+    provider: "supabase",
+    email_verified: Boolean(user.email_confirmed_at),
+  };
+  if (supabaseIdentityCache.size > 1000) supabaseIdentityCache.clear();
+  supabaseIdentityCache.set(token, {
+    identity,
+    expiresAt: Date.now() + 30_000,
+  });
+  return identity;
 }
 export async function sha256Hex(value: string): Promise<string> {
   return Array.from(
