@@ -259,3 +259,31 @@ test("tool schema and backend share the same 1500-character turn boundary", asyn
   );
   assert.equal(rejected.status, 422);
 });
+
+test("spoken Sí señor confirms the saved read-back order and preserves the actual consent words", async () => {
+  const client = await fixture();
+  const session = (
+    await client.call("create_session", { request_id: "polite-start" })
+  ).data.session_id;
+  await client.call("process_order_turn", {
+    session_id: session,
+    utterance: "One latte",
+    request_id: "polite-order",
+  });
+  const result = await client.call("confirm_order", {
+    session_id: session,
+    utterance: "Sí, señor.",
+    confirmed: true,
+    request_id: "polite-yes",
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.data.order.status, "PAYMENT_PENDING");
+  assert.equal(
+    client
+      .state()
+      .sessions.find((s) => s.id === session)!
+      .turns.filter((t) => t.role === "user")
+      .at(-1)?.text,
+    "Sí, señor.",
+  );
+});

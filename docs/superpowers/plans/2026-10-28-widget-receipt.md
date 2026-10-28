@@ -20,3 +20,10 @@
 - User explicitly approved moving the agent connection to signed-in merchant_487f76edfb79bd734201f5b1; updated AGENT_MERCHANT_ID in both deployments.
 - Original external widget /integration returned 404. Bundled CallerPhone under dashboard /integration replaces that unavailable default destination. Live iframe handshake and ElevenLabs audio connection verified.
 - Live spoken order confirmation and resulting Lovable receipt are still awaiting user test input; do not claim this live E2E step verified yet.
+
+## Live receipt result
+- Production conversation conv_2201m62ea5kdf8yb852zvsmcprc0 created RO-1051 for Prueba Recibo, one latte / 74 MXN.
+- The agent rejected a long concatenated consent and then the clear spoken phrase “Sí, señor.” Order was confirmed through the authorized owner dashboard to isolate receipt delivery.
+- End call automatically delivered exactly one receipt message in the production widget. Clicking it opened the real Lovable receipt with RO-1051, Prueba Recibo, one Latte, 74 MXN and payment pending. No payment was simulated or charged.
+- Narrow polite-confirmation fix accepts whole-string Sí señor/Sí señora/Yes sir/Yes ma’am/Sí es correcto while preserving refusals/change rejection. Regression tests failed before fix, now entire544-test suite/typecheck/build pass. New API deploy6ae289b6e7615bae06c080a7.
+- The new consent-phrase fix still needs a fresh voice-only retest; do not describe that retest as completed. Core post-hangup delivery and real Lovable destination are live-verified.
