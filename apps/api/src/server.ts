@@ -1901,7 +1901,7 @@ export async function handleRequest(
       if (!response.ok)
         throw new HttpError(
           502,
-          "Could not start an ElevenLabs voice session.",
+          `ElevenLabs rejected the voice session request (HTTP ${response.status}). Check the agent ID and API-key permissions.`,
         );
       result = await response.json();
     } else if (
