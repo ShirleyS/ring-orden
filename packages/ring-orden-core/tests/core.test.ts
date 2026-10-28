@@ -57,6 +57,32 @@ test("empty orders cannot be confirmed", () =>
     applyOperation(fresh(), { action: "confirm_order", confirmed: true }),
   ));
 
+for (const status of [
+  "CONFIRMED",
+  "PAYMENT_PENDING",
+  "POS_SYNC_PENDING",
+  "POS_SYNCED",
+  "POS_SYNC_FAILED",
+] as const)
+  test(`repeated confirmation preserves the submitted ${status} order`, () => {
+    const confirmed = applyOperation(latte(), {
+      action: "confirm_order",
+      confirmed: true,
+    });
+    const before = transitionOrder(confirmed, status);
+    // A retry must preserve the accepted quote even if the current menu changes.
+    const changedCatalog = DEMO_CATALOG.map((item) => ({
+      ...item,
+      price: item.price + 10,
+    }));
+    const after = applyOperation(
+      before,
+      { action: "confirm_order", confirmed: true },
+      changedCatalog,
+    );
+    assert.deepEqual(after, before);
+  });
+
 test("price is authoritative despite caller-invented totals", () => {
   const order = latte();
   order.items[0].unit_price = 0;

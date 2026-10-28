@@ -140,6 +140,17 @@ export function applyOperation(
       clarification: operation.question,
     };
   if (operation.action === "confirm_order") {
+    // Retrying consent must preserve the accepted quote and fulfillment progress.
+    if (
+      [
+        "CONFIRMED",
+        "PAYMENT_PENDING",
+        "POS_SYNC_PENDING",
+        "POS_SYNCED",
+        "POS_SYNC_FAILED",
+      ].includes(order.status)
+    )
+      return order;
     if (order.status === "AWAITING_CLARIFICATION" && order.clarification)
       throw new Error("Resolve the clarification before confirming");
     order = priceOrder(order, catalog, rules);

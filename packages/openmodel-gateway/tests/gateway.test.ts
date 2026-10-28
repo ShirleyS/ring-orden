@@ -9,12 +9,50 @@ import {
 import {
   createOrder,
   applyOperations,
+  transitionOrder,
   DEMO_CATALOG,
 } from "../../ring-orden-core/src/index.ts";
 function turn(order: ReturnType<typeof createOrder>, text: string) {
   const r = interpretDemo(text, order);
   return { result: r, order: applyOperations(order, r.operations) };
 }
+test("model confirmation of an order awaiting payment succeeds without regeneration", async () => {
+  const order = transitionOrder(
+    applyOperations(createOrder("m"), [
+      { action: "add_item", catalog_item_id: "latte" },
+      { action: "confirm_order", confirmed: true },
+    ]),
+    "PAYMENT_PENDING",
+  );
+  let requests = 0;
+  const adapter = new OpenAICompatibleAdapter({
+    provider: "generic",
+    endpoint: "https://example.com/v1",
+    model: "test",
+    fetch: async () => {
+      requests++;
+      return Response.json({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                operations: [{ action: "confirm_order", confirmed: true }],
+                reply: "Your order is confirmed.",
+              }),
+            },
+          },
+        ],
+      });
+    },
+  });
+  const result = await adapter.generateStructuredOutput({
+    utterance: "Yes, please.",
+    order,
+    catalog: DEMO_CATALOG,
+  });
+  assert.equal(requests, 1);
+  assert.deepEqual(applyOperations(order, result.operations), order);
+});
 test("an unfunded DeepSeek connection reports a billing blocker rather than a model quality score", async () => {
   let requests = 0;
   const adapter = new OpenAICompatibleAdapter({
