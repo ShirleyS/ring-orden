@@ -40,6 +40,7 @@ import {
   HttpError,
 } from "./auth.ts";
 import type { RuntimeEnv, Identity } from "./auth.ts";
+import { handleMojoAuthRequest } from "./mojoauth-login.ts";
 import { repositoryFor, storageStatus } from "./storage.ts";
 import { prepareSupabaseMigration } from "./supabase-migration.ts";
 import {
@@ -292,7 +293,12 @@ function bootstrap(
     integrations: integrations(env, state),
     team: state.team,
     mode: isDemo(env) ? "demo" : "live",
-    user: { name: identity.name, email: identity.email, role },
+    user: {
+      name: identity.name,
+      email: identity.email,
+      role,
+      provider: identity.provider,
+    },
     stats: {
       orders: confirmed.length,
       revenue: paid.reduce((s, o) => s + o.total, 0),
@@ -1112,6 +1118,8 @@ export async function handleRequest(
   repository?: Repository,
 ): Promise<Response> {
   try {
+    const authentication = await handleMojoAuthRequest(request, env);
+    if (authentication) return authentication;
     const url = new URL(request.url);
     const path = url.pathname
       .replace(/^\/api\/?/, "")
@@ -1152,11 +1160,6 @@ export async function handleRequest(
         "Set-Cookie": await makeSessionCookie(user, env),
       });
     }
-    if (path[0] === "auth" && path[1] === "logout")
-      return json({ ok: true }, 200, {
-        "Set-Cookie":
-          "ring_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0",
-      });
     let trustedTool = false;
     let identity: Identity;
     let merchantId: string;

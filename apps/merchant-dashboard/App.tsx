@@ -70,6 +70,7 @@ import {
   consumeSupabaseMagicLink,
   requestSupabaseMagicLink,
   supabaseAuthConfigured,
+  clearBrowserSignIn,
 } from "./supabase-auth";
 const nav = [
   {
@@ -242,6 +243,7 @@ export default function MerchantApp() {
   const [loginSent, setLoginSent] = useState(false);
   const [loginBusy, setLoginBusy] = useState(false);
   const [loginError, setLoginError] = useState("");
+  const [mojoAuthReady, setMojoAuthReady] = useState(false);
   const notify = useCallback((s: string) => {
     setToast(s);
     setTimeout(() => setToast(""), 5000);
@@ -259,6 +261,38 @@ export default function MerchantApp() {
     const t = setInterval(load, 8000);
     return () => clearInterval(t);
   }, [load]);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/auth/config", { cache: "no-store", signal: controller.signal })
+      .then(async (response) =>
+        response.ok
+          ? ((await response.json()) as { mojoauth?: { configured?: boolean } })
+          : null,
+      )
+      .then((config) => {
+        if (!controller.signal.aborted)
+          setMojoAuthReady(config?.mojoauth?.configured === true);
+      })
+      .catch(() => {
+        /* Existing Supabase or platform sign-in remains available. */
+      });
+    const url = new URL(window.location.href);
+    const problem = url.searchParams.get("signin_error");
+    if (problem) {
+      setLoginError(
+        problem === "cancelled"
+          ? "Sign-in was cancelled. You can try again."
+          : "We couldn’t complete sign-in. Please try again.",
+      );
+      url.searchParams.delete("signin_error");
+      window.history.replaceState(
+        null,
+        "",
+        url.pathname + url.search + url.hash,
+      );
+    }
+    return () => controller.abort();
+  }, []);
   useEffect(() => {
     const callbackError = consumeSupabaseMagicLink();
     if (callbackError) setLoginError(callbackError);
@@ -316,6 +350,22 @@ export default function MerchantApp() {
       setLoginBusy(false);
     }
   };
+  const signOut = async () => {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "same-origin",
+      });
+      if (!response.ok)
+        throw new Error("We couldn’t sign you out. Please try again.");
+      clearBrowserSignIn();
+      window.location.assign("/");
+    } catch (error) {
+      notify((error as Error).message);
+      setBusy(false);
+    }
+  };
   const exportOrders = () => {
     if (!data) return;
     const rows = [
@@ -357,7 +407,21 @@ export default function MerchantApp() {
     return (
       <div className="loading-page">
         <Logo />
-        {error.toLowerCase().includes("sign in") && supabaseAuthConfigured ? (
+        {error && mojoAuthReady ? (
+          <>
+            <h2>Welcome to Ring Orden</h2>
+            <p>Sign in securely to open your restaurant workspace.</p>
+            {loginError && (
+              <p role="alert" style={{ color: "#923c4e" }}>
+                {loginError}
+              </p>
+            )}
+            <a className="primary" href="/api/auth/mojo/login">
+              Sign in with MojoAuth <ArrowRight size={16} />
+            </a>
+          </>
+        ) : error.toLowerCase().includes("sign in") &&
+          supabaseAuthConfigured ? (
           <>
             <h2>Sign in to Ring Orden</h2>
             <p>
@@ -502,6 +566,11 @@ export default function MerchantApp() {
           ))}
         </nav>
         <div className="sidebar-bottom">
+          {data.user.provider === "mojoauth" && (
+            <button className="nav-item" disabled={busy} onClick={signOut}>
+              Sign out of workspace
+            </button>
+          )}
           {data.user.role !== "STAFF" && (
             <div className="help-card">
               <span className="help-icon">
