@@ -1,9 +1,19 @@
 import { HttpError } from "./auth.ts";
 import type { RuntimeEnv } from "./auth.ts";
 import type { Order } from "../../../packages/ring-orden-core/src/index.ts";
-import type { Repository, TenantState } from "./types.ts";
+import type { Repository, TenantState, OrderMetadata } from "./types.ts";
 import { issueCustomerReceiptLink } from "./customer-orders.ts";
 import { sendReceiptWhatsApp } from "./payments.ts";
+
+export function receiptRetryAllowed(
+  notification: OrderMetadata["receipt_notification"],
+  now = Date.now(),
+) {
+  return (
+    notification?.status !== "PROCESSING" ||
+    Date.parse(notification.updated_at) <= now - 10 * 60000
+  );
+}
 
 export function recordReceiptConsent(
   state: TenantState,
@@ -52,10 +62,7 @@ export async function sendPendingCustomerReceipt(
     throw new HttpError(409, "Confirm the order before sending a receipt.");
   const previous = meta.receipt_notification;
   if (previous && !explicitRetry) return { status: previous.status };
-  if (
-    previous?.status === "PROCESSING" &&
-    Date.parse(previous.updated_at) > Date.now() - 10 * 60000
-  )
+  if (!receiptRetryAllowed(previous))
     throw new HttpError(
       409,
       "A receipt message is already processing. Check its status before retrying.",

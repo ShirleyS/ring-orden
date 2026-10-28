@@ -1,5 +1,6 @@
 import type { RuntimeEnv } from "./auth.ts";
 import { HttpError } from "./auth.ts";
+import { customerOrigin } from "./customer-orders.ts";
 import type { Order } from "../../../packages/ring-orden-core/src/index.ts";
 export async function hmacHex(
   secret: string,
@@ -74,13 +75,17 @@ export async function createCheckout(
       503,
       "Connect a Stripe test-mode key to create a checkout link.",
     );
+  const portalOrigin =
+    !returnUrls && env.CUSTOMER_APP_ORIGIN ? customerOrigin(env) : undefined;
   const data = new URLSearchParams({
     mode: "payment",
     success_url:
       returnUrls?.success ??
+      (portalOrigin ? `${portalOrigin}/order?payment=returned` : undefined) ??
       `${origin}/?payment=success&order=${encodeURIComponent(order.id)}`,
     cancel_url:
       returnUrls?.cancel ??
+      (portalOrigin ? `${portalOrigin}/order?payment=cancelled` : undefined) ??
       `${origin}/?payment=cancelled&order=${encodeURIComponent(order.id)}`,
     client_reference_id: order.id,
     "metadata[merchant_id]": order.merchant_id,

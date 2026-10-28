@@ -555,3 +555,80 @@ test("receipt token cannot be forged to select another order or tenant and is ne
     env.CUSTOMER_APP_ORIGIN,
   );
 });
+
+test("portal-enabled merchant confirmation creates checkout returns on the customer origin", async () => {
+  const original = globalThis.fetch;
+  let checkout: URLSearchParams | undefined;
+  globalThis.fetch = async (_url, init) => {
+    checkout = new URLSearchParams(String(init?.body));
+    return Response.json({
+      id: "cs_test_receipt_return",
+      url: "https://checkout.stripe.com/c/pay/cs_test_receipt_return",
+    });
+  };
+  try {
+    const f = await fixture(false, {
+      ...env,
+      STRIPE_SECRET_KEY: "sk_test_receipt_return",
+    });
+    const result = await f.owner(`orders/${f.order.id}/action`, "POST", {
+      action: "confirm",
+      confirmed: true,
+    });
+    assert.equal(result.status, 200);
+    assert.equal(
+      checkout?.get("success_url"),
+      "https://order.example/order?payment=returned",
+    );
+    assert.equal(
+      checkout?.get("cancel_url"),
+      "https://order.example/order?payment=cancelled",
+    );
+    assert.equal(checkout?.toString().includes(f.editToken), false);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("cancelled and refunded orders can replace receipt links while checkout stays blocked", async () => {
+  const f = await fixture();
+  for (const status of ["CANCELLED", "REFUND_PENDING", "REFUNDED"] as const) {
+    const row = (await f.repo.loadByMerchant(f.order.merchant_id))!;
+    row.state.orders.find((o) => o.id === f.order.id)!.status = status;
+    await f.repo.saveTrusted(f.order.merchant_id, row.revision, row.state);
+    const link = await f.owner(`orders/${f.order.id}/receipt-link`, "POST", {});
+    assert.equal(link.status, 201, status);
+    const headers = {
+      Authorization: `Bearer ${new URL(link.data.url).hash.slice(1)}`,
+    };
+    const view = await f.call("customer/receipt", "GET", undefined, headers);
+    assert.equal(view.data.order.status, status);
+    assert.equal(view.data.can_pay, false);
+    assert.equal(
+      (await f.call("customer/checkout", "POST", {}, headers)).status,
+      409,
+    );
+    assert.equal(
+      (await f.owner(`orders/${f.order.id}/customer-link`, "POST", {})).status,
+      409,
+    );
+  }
+});
+
+test("owner receipt controls expose recovery eligibility for stale processing claims", async () => {
+  const f = await fixture();
+  for (const [age, allowed] of [
+    [0, false],
+    [11 * 60000, true],
+  ] as const) {
+    const row = (await f.repo.loadByMerchant(f.order.merchant_id))!;
+    row.state.order_metadata[f.order.id].receipt_notification = {
+      claim: "crash",
+      status: "PROCESSING",
+      updated_at: new Date(Date.now() - age).toISOString(),
+    };
+    await f.repo.saveTrusted(f.order.merchant_id, row.revision, row.state);
+    const view = await f.owner(`orders/${f.order.id}`);
+    assert.equal(view.data.receipt_retry_allowed, allowed);
+  }
+});

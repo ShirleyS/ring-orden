@@ -53,6 +53,7 @@ import { retryDuePOS } from "./pos-retry.ts";
 import {
   recordReceiptConsent,
   sendPendingCustomerReceipt,
+  receiptRetryAllowed,
 } from "./customer-receipt-delivery.ts";
 import {
   handleCustomerOrderRequest,
@@ -125,6 +126,9 @@ function metadata(state: TenantState, order: Order) {
   return {
     ...order,
     ...safeMetadata,
+    receipt_retry_allowed: receiptRetryAllowed(
+      safeMetadata.receipt_notification,
+    ),
     customer_name: order.customer.name,
   };
 }

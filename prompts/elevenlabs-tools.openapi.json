@@ -53,9 +53,7 @@
                     "description": "Stable unique ID for starting this call. Reuse the same ID and body if the request is retried; never generate a new ID for a retry."
                   }
                 },
-                "required": [
-                  "request_id"
-                ],
+                "required": ["request_id"],
                 "additionalProperties": false
               }
             }
@@ -176,9 +174,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "session_id"
-                ],
+                "required": ["session_id"],
                 "additionalProperties": false
               }
             }
@@ -231,11 +227,7 @@
                     "pattern": "\\S"
                   }
                 },
-                "required": [
-                  "session_id",
-                  "utterance",
-                  "request_id"
-                ],
+                "required": ["session_id", "utterance", "request_id"],
                 "additionalProperties": false
               }
             }
@@ -260,7 +252,7 @@
     "/api/tools/confirm_order": {
       "post": {
         "operationId": "confirm_order",
-        "description": "Confirm only after repeating the final summary and receiving explicit current consent.",
+        "description": "Confirm only after repeating the final summary and receiving explicit current consent. Separately ask whether the customer wants their order and receipt link by WhatsApp to their order phone. Set whatsapp_receipt true only after that explicit opt-in. Never claim WhatsApp delivery from order confirmation alone.",
         "security": [
           {
             "agentBearer": []
@@ -284,6 +276,10 @@
                   "confirmed": {
                     "type": "boolean",
                     "const": true
+                  },
+                  "whatsapp_receipt": {
+                    "type": "boolean",
+                    "description": "Optional separate customer opt-in to receive order and receipt by WhatsApp at their existing order phone. Default false; do not infer from phone presence."
                   },
                   "request_id": {
                     "type": "string",
@@ -339,9 +335,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "session_id"
-                ],
+                "required": ["session_id"],
                 "additionalProperties": false
               }
             }
@@ -386,10 +380,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "session_id",
-                  "reason"
-                ],
+                "required": ["session_id", "reason"],
                 "additionalProperties": false
               }
             }
@@ -434,10 +425,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "session_id",
-                  "reason"
-                ],
+                "required": ["session_id", "reason"],
                 "additionalProperties": false
               }
             }

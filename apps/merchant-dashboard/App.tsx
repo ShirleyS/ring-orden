@@ -2486,6 +2486,7 @@ function OrderDetail({
                   busy={busy}
                   expiresAt={o.receipt_link?.expires_at}
                   status={o.receipt_notification?.status}
+                  retryAllowed={o.receipt_retry_allowed === true}
                   onRequest={onReceipt}
                 />
               )}

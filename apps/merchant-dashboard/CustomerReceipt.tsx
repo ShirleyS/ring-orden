@@ -17,12 +17,14 @@ export default function CustomerReceipt({
   orderId,
   expiresAt,
   status,
+  retryAllowed,
   busy,
   onRequest,
 }: {
   orderId: string;
   expiresAt?: string;
   status?: string;
+  retryAllowed: boolean;
   busy: boolean;
   onRequest: (
     route: "receipt-link" | "receipt-send",
@@ -135,12 +137,15 @@ export default function CustomerReceipt({
       </label>
       <button
         className="secondary"
-        disabled={busy || !consent || status === "PROCESSING"}
+        disabled={busy || !consent || !retryAllowed}
         onClick={send}
       >
         Send / resend WhatsApp receipt
       </button>
       <p className="muted">
+        {status === "PROCESSING" && retryAllowed
+          ? "Previous attempt is uncertain; it may already have sent a message. "
+          : ""}
         {status ? `WhatsApp: ${label(status)}. ` : ""}Resending replaces the
         previous receipt link. An uncertain result may already have sent a
         message; check before retrying.

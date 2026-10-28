@@ -177,11 +177,12 @@ export async function issueCustomerOrderLink(
   if (scope === "receipt" && draftStatuses.has(order.status))
     throw new HttpError(409, "Confirm this order before creating a receipt.");
   if (
-    (scope === "order" && order.merchant_id !== state.merchant.id) ||
+    order.merchant_id !== state.merchant.id ||
     !state.orders.some((o) => o.id === order.id)
   )
     throw new HttpError(404, "Order not found in your workspace.");
   if (
+    scope === "order" &&
     ["CANCELLED", "REFUND_PENDING", "REFUNDED", "ESCALATED"].includes(
       order.status,
     )
