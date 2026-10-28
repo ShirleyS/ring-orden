@@ -48,6 +48,25 @@ const cookieHeader = (response: Response) =>
     .map((c) => c.split(";")[0])
     .join("; ");
 
+function applyCookies(previous: string, response: Response) {
+  const jar = new Map(
+    previous
+      .split("; ")
+      .filter(Boolean)
+      .map((pair) => {
+        const i = pair.indexOf("=");
+        return [pair.slice(0, i), pair.slice(i + 1)] as const;
+      }),
+  );
+  for (const cookie of response.headers.getSetCookie()) {
+    const pair = cookie.split(";")[0];
+    const i = pair.indexOf("=");
+    if (cookie.includes("Max-Age=0")) jar.delete(pair.slice(0, i));
+    else jar.set(pair.slice(0, i), pair.slice(i + 1));
+  }
+  return [...jar.entries()].map(([key, value]) => key + "=" + value).join("; ");
+}
+
 async function fixture(
   run: (f: {
     begin: () => Promise<{ response: Response; auth: URL; cookie: string }>;
@@ -493,4 +512,51 @@ test("logout is same-origin POST and clears the session without needing storage"
       .getSetCookie()
       .some((c) => c.startsWith("ring_session=;") && c.includes("Max-Age=0")),
   );
+});
+
+test("signing in clears another account's remembered workspace before opening the dashboard", async () => {
+  await fixture(async ({ begin, callback }) => {
+    const { auth, cookie } = await begin();
+    const previousCookies = cookie + "; ring_workspace=another-merchant";
+    const response = await callback(auth, previousCookies);
+    assert.equal(response.headers.get("location"), "/");
+    const bootstrap = await handleRequest(
+      new Request(origin + "/api/bootstrap", {
+        headers: { cookie: applyCookies(previousCookies, response) },
+      }),
+      env,
+      new MemoryRepository(),
+    );
+    assert.equal(bootstrap.status, 200);
+    const logout = await handleRequest(
+      new Request(origin + "/api/auth/logout", {
+        method: "POST",
+        headers: { origin },
+      }),
+      env,
+    );
+    assert.ok(
+      logout.headers
+        .getSetCookie()
+        .some(
+          (c) => c.startsWith("ring_workspace=;") && c.includes("Max-Age=0"),
+        ),
+    );
+  });
+});
+
+test("logout invalidates an outstanding browser login transaction", async () => {
+  await fixture(async ({ begin, callback, calls }) => {
+    const { auth, cookie } = await begin();
+    const logout = await handleRequest(
+      new Request(origin + "/api/auth/logout", {
+        method: "POST",
+        headers: { origin, cookie },
+      }),
+      env,
+    );
+    const response = await callback(auth, applyCookies(cookie, logout));
+    assert.equal(response.headers.get("location"), "/?signin_error=failed");
+    assert.ok(!calls.includes(issuer + "/oauth2/token"));
+  });
 });

@@ -29,7 +29,7 @@
 
 **Files:**
 
-- Create: `apps/api/src/mojoauth-login.ts`, `apps/api/tests/mojoauth-login.test.ts`
+- Create: `apps/api/src/mojoauth-login.ts`, `apps/api/tests/mojoauth-login.test.ts`, `apps/api/tests/merchant-auth-client.test.ts`
 - Modify: `apps/api/src/auth.ts`, `apps/api/src/server.ts`, `netlify/functions/api.mts`, `apps/merchant-dashboard/App.tsx`, `apps/merchant-dashboard/supabase-auth.ts`, `docs/NETLIFY.md`, `.env.example`
 
 **Interfaces:**
@@ -42,3 +42,7 @@
 - [x] **Step 3: Implement server handler and dashboard UI.** Dispatch auth before storage, use discovered endpoints, encrypt the transaction, verify ID token nonce and claims, expose readiness only, show login and safe error, add session logout.
 - [x] **Step 4: Verify GREEN and build.** Run `npm test`, `npm run typecheck`, `npm run build:netlify`. Expected: all tests/typecheck pass and build succeeds.
 - [x] **Step 5: Document configuration and commit.** Record exact callback, secret requirement, identity separation, private hosting gate, and unverified live login. Commit source and tests; review before pushing the existing authorized draft PR.
+
+## Verification result
+
+395 tests pass, including 33 hosted-login and real browser-client regressions. TypeScript, Netlify frontend build and separate function bundle pass. Independent review fixes cover stale Supabase refresh, account switching with remembered workspace selection, preserved existing email login and pending transaction invalidation on logout. Live MojoAuth and deployed browser behavior remain unverified; no deployment or provider settings were changed.

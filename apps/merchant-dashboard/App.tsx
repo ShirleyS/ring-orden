@@ -244,6 +244,7 @@ export default function MerchantApp() {
   const [loginBusy, setLoginBusy] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [mojoAuthReady, setMojoAuthReady] = useState(false);
+  const [useEmailSignIn, setUseEmailSignIn] = useState(false);
   const notify = useCallback((s: string) => {
     setToast(s);
     setTimeout(() => setToast(""), 5000);
@@ -407,7 +408,7 @@ export default function MerchantApp() {
     return (
       <div className="loading-page">
         <Logo />
-        {error && mojoAuthReady ? (
+        {error && mojoAuthReady && !useEmailSignIn ? (
           <>
             <h2>Welcome to Ring Orden</h2>
             <p>Sign in securely to open your restaurant workspace.</p>
@@ -419,11 +420,30 @@ export default function MerchantApp() {
             <a className="primary" href="/api/auth/mojo/login">
               Sign in with MojoAuth <ArrowRight size={16} />
             </a>
+            {supabaseAuthConfigured && (
+              <button
+                className="text-button"
+                onClick={() => {
+                  setUseEmailSignIn(true);
+                  setLoginError("");
+                }}
+              >
+                Use existing email sign-in
+              </button>
+            )}
           </>
         ) : error.toLowerCase().includes("sign in") &&
           supabaseAuthConfigured ? (
           <>
             <h2>Sign in to Ring Orden</h2>
+            {mojoAuthReady && (
+              <button
+                className="text-button"
+                onClick={() => setUseEmailSignIn(false)}
+              >
+                Use MojoAuth instead
+              </button>
+            )}
             <p>
               {loginSent
                 ? `Check ${loginEmail} for your secure sign-in link.`

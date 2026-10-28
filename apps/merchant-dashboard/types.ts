@@ -41,16 +41,22 @@ export const api = async <T = any>(
   body?: unknown,
   signal?: AbortSignal,
 ): Promise<T> => {
-  const token = await supabaseAccessToken();
-  const r = await fetch("/api" + path, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    ...(signal ? { signal } : {}),
-  });
+  const send = (token?: string) =>
+    fetch("/api" + path, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      ...(signal ? { signal } : {}),
+    });
+  // A server session must not depend on another provider's refresh availability.
+  let r = await send();
+  if (r.status === 401) {
+    const token = await supabaseAccessToken();
+    if (token) r = await send(token);
+  }
   const d: any = await r.json();
   if (!r.ok)
     throw new Error(

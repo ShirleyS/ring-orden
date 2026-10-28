@@ -10,6 +10,7 @@ const callbackPath = "/api/auth/mojo/callback";
 const transactionName = "__Host-ring_mojo_tx";
 const cookieAttributes = "; HttpOnly; Secure; SameSite=Lax; Path=/";
 const clearTransaction = `${transactionName}=${cookieAttributes}; Max-Age=0`;
+const clearWorkspace = `ring_workspace=${cookieAttributes}; Max-Age=0`;
 const encoder = new TextEncoder();
 const encode = (bytes: Uint8Array) =>
   btoa(String.fromCharCode(...bytes))
@@ -229,9 +230,14 @@ export async function handleMojoAuthRequest(
     } catch (error) {
       return errorResponse(error);
     }
-    return json({ ok: true }, 200, {
-      "Set-Cookie": `ring_session=${cookieAttributes}; Max-Age=0`,
-    });
+    const headers = new Headers(securityHeaders);
+    for (const cookie of [
+      `ring_session=${cookieAttributes}; Max-Age=0`,
+      clearWorkspace,
+      clearTransaction,
+    ])
+      headers.append("Set-Cookie", cookie);
+    return Response.json({ ok: true }, { headers });
   }
   if (path === "/api/auth/mojo/login") {
     try {
@@ -334,6 +340,7 @@ export async function handleMojoAuthRequest(
     const identity = await verifyMojoToken(tokens.id_token, env, tx.nonce);
     return redirect("/", [
       clearTransaction,
+      clearWorkspace,
       await makeSessionCookie(identity, env),
     ]);
   } catch {
