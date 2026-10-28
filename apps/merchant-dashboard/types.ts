@@ -1,3 +1,5 @@
+import { supabaseAccessToken } from "./supabase-auth";
+
 export type Obj = Record<string, any>;
 export type Workspace = {
   merchant: Obj;
@@ -38,9 +40,13 @@ export const api = async <T = any>(
   method = "GET",
   body?: unknown,
 ): Promise<T> => {
+  const token = await supabaseAccessToken();
   const r = await fetch("/api" + path, {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
   const d: any = await r.json();
