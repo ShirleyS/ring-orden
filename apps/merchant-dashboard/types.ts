@@ -39,6 +39,7 @@ export const api = async <T = any>(
   path: string,
   method = "GET",
   body?: unknown,
+  signal?: AbortSignal,
 ): Promise<T> => {
   const token = await supabaseAccessToken();
   const r = await fetch("/api" + path, {
@@ -48,6 +49,7 @@ export const api = async <T = any>(
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    ...(signal ? { signal } : {}),
   });
   const d: any = await r.json();
   if (!r.ok)

@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react";
+import { api } from "./types";
 
 type Phase =
   | "idle"
@@ -135,31 +136,13 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
       request.current = controller;
       signedTimer = setTimeout(() => controller.abort(), 15000);
       // Fetch configuration first: an unconfigured workspace never prompts for a microphone.
-      const response = await fetch("/api/voice/signed-url", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: "{}",
-        signal: controller.signal,
-      });
-      clearTimeout(signedTimer);
-      signedTimer = undefined;
-      const payload = (await response.json()) as {
+      const payload = await api<{
         signed_url?: string;
         error?: string | { message?: string };
         message?: string;
-      };
-      if (!response.ok) {
-        const detail =
-          typeof payload.error === "string"
-            ? payload.error
-            : payload.error?.message;
-        throw new Error(
-          detail ||
-            payload.message ||
-            "Your voice connection is not ready. Check ElevenLabs settings and try again.",
-        );
-      }
+      }>("/voice/signed-url", "POST", {}, controller.signal);
+      clearTimeout(signedTimer);
+      signedTimer = undefined;
       if (!current()) return;
       if (!payload.signed_url)
         throw new Error(
