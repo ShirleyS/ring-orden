@@ -31,7 +31,7 @@ export function isExplicitConfirmation(utterance: string): boolean {
   if (/^(?:(?:是的|对))?(?:请)?(?:确认(?:订单|下单)|下单)$/.test(chinese)) return true;
   const text = normalize(utterance);
   return (
-    /^(yes|si|correct|confirmed|looks good|yes please|si por favor|place my order)$/.test(
+    /^(yes|si|correct|confirmed|perfect|perfecto|looks good|yes please|si por favor|place my order)$/.test(
       text,
     ) ||
     /^(?:(?:yes|si) )?(?:confirm(?: my| the)? order|confirm(?:ar|o)?(?: (?:mi|el))?(?: pedido)?|that(?: is| s) (?:right|correct))(?: please| por favor)?$/.test(

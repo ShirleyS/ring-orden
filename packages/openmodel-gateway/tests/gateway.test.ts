@@ -249,6 +249,8 @@ for (const phrase of [
   "yes that is correct",
   "sí confirmo mi pedido",
   "Sí, confirmar el pedido",
+  "Perfect.",
+  "Perfecto.",
 ])
   test(`explicit consent ${phrase}`, () => {
     const o = turn(createOrder("m"), "one latte").order;
@@ -262,6 +264,9 @@ for (const phrase of [
   "is it confirmed?",
   "I might confirm later",
   "yes add a latte",
+  "not perfect",
+  "Perfect, but add another latte",
+  "Perfecto, pero todavía no confirmes",
 ])
   test(`does not infer consent ${phrase}`, () =>
     assert.notEqual(

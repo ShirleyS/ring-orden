@@ -2670,14 +2670,53 @@ export async function handleRequest(
         if (body.confirmed !== true)
           throw new HttpError(422, "Explicit customer confirmation required.");
         const utterance = z.string().min(1).max(1500).parse(body.utterance);
-        recordReceiptConsent(
-          state,
-          findOrder(state, session.order_id),
-          z.boolean().optional().parse(body.whatsapp_receipt),
-        );
-        result = await processTurn(state, session, utterance, env, url.origin, [
-          { action: "confirm_order", confirmed: true },
-        ]);
+        if (!isExplicitConfirmation(utterance)) {
+          // Missing spoken consent is a conversational follow-up, not a failed submission.
+          // Keep the exact utterance and draft; never infer consent from the tool boolean.
+          const question =
+            "May I place this exact order now? Please say yes to confirm, or no to keep it unsubmitted.";
+          const createdAt = new Date().toISOString();
+          const operations: Operation[] = [
+            { action: "request_clarification", question },
+          ];
+          session.turns.push(
+            {
+              id: uid("turn"),
+              role: "user",
+              text: utterance,
+              created_at: createdAt,
+            },
+            {
+              id: uid("turn"),
+              role: "assistant",
+              text: question,
+              created_at: createdAt,
+              operations,
+            },
+          );
+          result = {
+            order: metadata(state, findOrder(state, session.order_id)),
+            reply: question,
+            confirmation_required: true,
+            operations,
+            turns: session.turns,
+            memories_used: [],
+          };
+        } else {
+          recordReceiptConsent(
+            state,
+            findOrder(state, session.order_id),
+            z.boolean().optional().parse(body.whatsapp_receipt),
+          );
+          result = await processTurn(
+            state,
+            session,
+            utterance,
+            env,
+            url.origin,
+            [{ action: "confirm_order", confirmed: true }],
+          );
+        }
       } else if (["request_human", "escalate_issue"].includes(tool)) {
         let order = findOrder(state, session.order_id);
         order = applyOperation(
