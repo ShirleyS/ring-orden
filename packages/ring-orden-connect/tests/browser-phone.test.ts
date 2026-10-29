@@ -136,3 +136,13 @@ test('phone launch opens a sized popup immediately with the same bridge instance
   assert.match(features, /popup,width=430,height=820/);
   assert.equal(openBrowserPhonePopup(() => null, 'https://phone.example', 'https://ring.test', 'blocked'), null);
 });
+
+test('blank popup retries its destination but never reloads an already loaded cross-origin phone', async () => {
+  const { recoverBlankPhonePopup } = await import('../src/browser-phone.ts');
+  const destinations: string[] = [];
+  assert.equal(recoverBlankPhonePopup({closed:false, location:{href:'about:blank', replace:(url:string)=>destinations.push(url)}}, 'https://phone.example/integration'), true);
+  assert.deepEqual(destinations, ['https://phone.example/integration']);
+  assert.equal(recoverBlankPhonePopup({closed:true, location:{href:'about:blank', replace:()=>assert.fail()}}, 'https://phone.example'), false);
+  assert.equal(recoverBlankPhonePopup({closed:false, get location(): {href:string;replace:(url:string)=>void} {throw new Error('cross-origin');}}, 'https://phone.example'), false);
+  assert.equal(recoverBlankPhonePopup({closed:false, location:{href:'https://phone.example/integration', replace:()=>assert.fail()}}, 'https://phone.example'), false);
+});

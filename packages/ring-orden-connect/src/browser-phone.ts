@@ -85,6 +85,21 @@ export function openBrowserPhonePopup<T>(
   return open(browserPhoneUrl(origin, parentOrigin, instance), `ring-phone-${instance}`, "popup,width=430,height=820");
 }
 
+/** A browser can create the popup while its first navigation is still blank. */
+export function recoverBlankPhonePopup(
+  popup: { closed: boolean; readonly location: { href: string; replace: (url: string) => void } } | null,
+  url: string,
+): boolean {
+  try {
+    if (!popup || popup.closed || popup.location.href !== "about:blank") return false;
+    popup.location.replace(url);
+    return true;
+  } catch {
+    // Cross-origin access means the phone has already left about:blank.
+    return false;
+  }
+}
+
 export async function withDeadline<T>(
   pending: Promise<T>,
   ms: number,

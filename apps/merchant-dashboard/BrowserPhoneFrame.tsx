@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   browserPhoneUrl,
   openBrowserPhonePopup,
+  recoverBlankPhonePopup,
   handleBrowserPhonePopupClosed,
   handleBrowserPhoneMuteRequest,
   readBrowserPhoneEvent,
@@ -21,6 +22,7 @@ export function launchCallerPhone(): PhoneLaunch {
   const instance = crypto.randomUUID();
   const origin = "https://browser-bell-companion.lovable.app";
   const popup = openBrowserPhonePopup(window.open.bind(window), origin, window.location.origin, instance);
+  recoverBlankPhonePopup(popup, browserPhoneUrl(origin, window.location.origin, instance));
   popup?.focus();
   return { instance, origin, popup };
 }
@@ -70,6 +72,7 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
   const frame = useRef<HTMLIFrameElement>(null);
   const popup = useRef<Window | null>(props.launch?.popup || null);
   const iframeReady = useRef(false);
+  const popupReady = useRef(false);
   const handshakeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
@@ -123,11 +126,20 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
   const waitForReady = () => {
     clearTimeout(handshakeTimer.current);
     handshakeTimer.current = setTimeout(
-      () =>
+      () => {
+        if (popup.current && !popupReady.current) {
+          popup.current.close();
+          popup.current = null;
+          setInPopup(false);
+          setReady(iframeReady.current);
+          configure(frame.current?.contentWindow);
+          sendState(frame.current?.contentWindow);
+        }
         setBridge(
-          "Caller phone has not connected after 3 seconds. Check the launch destination below or use Start call.",
-        ),
-      3000,
+          "The phone window did not connect. Use the phone below or click Open phone window to try again.",
+        );
+      },
+      10000,
     );
   };
   useEffect(() => {
@@ -135,9 +147,15 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
     const handle = (event: MessageEvent) => {
       const peer = popup.current || frame.current?.contentWindow;
       const message = readBrowserPhoneEvent(event, peer, origin, instance);
-      if (!message) return;
+      if (!message) {
+        // Keep the embedded fallback ready without letting it control the popup's call.
+        if (popup.current && readBrowserPhoneEvent(event, frame.current?.contentWindow, origin, instance)?.type === "ready")
+          iframeReady.current = true;
+        return;
+      }
       switch (message.type) {
         case "ready":
+          if (popup.current) popupReady.current = true;
           clearTimeout(handshakeTimer.current);
           if (!popup.current) iframeReady.current = true;
           setReady(true);
@@ -175,7 +193,14 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
       }
     };
     window.addEventListener("message", handle);
+    let recoveryAttempts = 0;
     const watchPopup = setInterval(() => {
+      if (popup.current && !popupReady.current && recoveryAttempts < 3) {
+        if (recoverBlankPhonePopup(popup.current, url)) {
+          recoveryAttempts++;
+          setBridge("Retrying the phone window…");
+        }
+      }
       handleBrowserPhonePopupClosed(
         popup.current,
         () => current.current.onStop(),
@@ -224,6 +249,8 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
       return;
     }
     popup.current = opened;
+    popupReady.current = false;
+    recoverBlankPhonePopup(opened, url);
     setInPopup(true);
     setReady(false);
     setBridge("Waiting for the caller popup handshake…");
@@ -249,7 +276,7 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
           background: "#fafaf7",
         }}
       />
-      {inPopup && <p>Caller phone is open in its own window.</p>}
+      {inPopup && <p>{ready ? "Caller phone is open in its own window." : "Opening your phone window…"}</p>}
       <p role="status" style={{ margin: 0, fontSize: 12 }}>
         {bridge}
       </p>
@@ -276,7 +303,7 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
         }}
         style={{ fontSize: 12 }}
       >
-        Open this caller phone instance in a window ↗
+        Open phone window ↗
       </a>
     </div>
   );
