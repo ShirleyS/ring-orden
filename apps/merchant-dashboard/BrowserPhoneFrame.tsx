@@ -154,6 +154,7 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
       }
       switch (message.type) {
         case "ready":
+          if (configuredPeer.current === peer) waitForReady();
           // Ready only means the document loaded, not that configuration arrived.
           configuredPeer.current = null;
           popupReady.current = false;
@@ -223,7 +224,7 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
           configure(frame.current?.contentWindow);
           sendState(frame.current?.contentWindow);
           sendMessages();
-          if (!iframeReady.current) waitForReady();
+          waitForReady();
         },
       );
     }, 500);

@@ -52,6 +52,7 @@ export function VoiceCall({ onClose, notify, onUpdate, launch }: VoiceCallProps)
   const mounted = useRef(false),
     generation = useRef(0),
     starting = useRef(false);
+  const startOwner = useRef<symbol | null>(null);
   const session = useRef<VoiceSession | null>(null),
     request = useRef<AbortController | null>(null),
     permissionStream = useRef<MediaStream | null>(null);
@@ -70,6 +71,7 @@ export function VoiceCall({ onClose, notify, onUpdate, launch }: VoiceCallProps)
   }, []);
 
   const stop = useCallback(async () => {
+    startOwner.current = null;
     generation.current++;
     starting.current = false;
     request.current?.abort();
@@ -114,6 +116,7 @@ export function VoiceCall({ onClose, notify, onUpdate, launch }: VoiceCallProps)
       // This generation counter invalidates asynchronous work during cleanup.
       // eslint-disable-next-line react-hooks/exhaustive-deps
       generation.current++;
+      startOwner.current = null;
       starting.current = false;
       request.current?.abort();
       request.current = null;
@@ -176,6 +179,8 @@ export function VoiceCall({ onClose, notify, onUpdate, launch }: VoiceCallProps)
 
   const start = async () => {
     if (starting.current || session.current) return;
+    const owner = Symbol("voice-start");
+    startOwner.current = owner;
     // A new call owns a fresh receipt wait; the ended call cannot update its UI.
     receiptAbort.current.abort();
     receiptAbort.current = new AbortController();
@@ -320,6 +325,7 @@ export function VoiceCall({ onClose, notify, onUpdate, launch }: VoiceCallProps)
         onError: (message: string) => {
           failed = true;
           if (current()) {
+            starting.current = false;
             setPhase("error");
             setStage("ElevenLabs connection error");
             setError(
@@ -367,11 +373,11 @@ export function VoiceCall({ onClose, notify, onUpdate, launch }: VoiceCallProps)
       ]);
       clearTimeout(connectTimer);
       connectTimer = undefined;
-      releasePermissionStream();
       if (!current() || failed || finished) {
         await connected.endSession().catch(() => {});
         return;
       }
+      releasePermissionStream();
       session.current = connected;
       setConversationId(connected.getId());
       setStage("Connected to ElevenLabs agent");
@@ -399,10 +405,8 @@ export function VoiceCall({ onClose, notify, onUpdate, launch }: VoiceCallProps)
     } finally {
       if (signedTimer) clearTimeout(signedTimer);
       if (connectTimer) clearTimeout(connectTimer);
-      if (
-        generation.current === attempt ||
-        (failed && generation.current === attempt + 1)
-      ) {
+      if (startOwner.current === owner) {
+        startOwner.current = null;
         starting.current = false;
         request.current = null;
         releasePermissionStream();

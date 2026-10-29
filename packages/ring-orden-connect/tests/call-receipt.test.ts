@@ -68,3 +68,11 @@ test("a stalled request times out instead of trapping the call dialog", async ()
     /timed out/i,
   );
 });
+
+test('closing during lookup startup aborts even when the request never settles', {timeout:100}, async () => {
+  const controller = new AbortController();
+  await assert.rejects(waitForCallReceipt('conv-closing', () => {
+    controller.abort(new DOMException('Dialog closed', 'AbortError'));
+    return new Promise(() => {});
+  }, {signal:controller.signal,requestTimeoutMs:10}), /Dialog closed/);
+});

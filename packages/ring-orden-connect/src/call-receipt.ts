@@ -21,6 +21,10 @@ export async function waitForCallReceipt(
     options.pause ??
     (() =>
       new Promise<void>((resolve, reject) => {
+        if (options.signal?.aborted) {
+          reject(options.signal.reason);
+          return;
+        }
         const abort = () => {
           clearTimeout(timer);
           reject(new DOMException("Aborted", "AbortError"));
@@ -32,6 +36,7 @@ export async function waitForCallReceipt(
         options.signal?.addEventListener("abort", abort, { once: true });
       }));
   const lookupOnce = async () => {
+    options.signal?.throwIfAborted();
     const controller = new AbortController();
     const abort = () => controller.abort(options.signal?.reason);
     options.signal?.addEventListener("abort", abort, { once: true });
@@ -40,20 +45,20 @@ export async function waitForCallReceipt(
         controller.abort(new Error("Receipt request timed out. Please retry.")),
       options.requestTimeoutMs ?? 8000,
     );
+    let rejectAborted: (() => void) | undefined;
+    const aborted = new Promise<never>((_, reject) => {
+      rejectAborted = () => reject(controller.signal.reason);
+      controller.signal.addEventListener("abort", rejectAborted, { once: true });
+    });
     try {
       return await Promise.race([
+        aborted,
         lookup(conversation, controller.signal),
-        new Promise<never>((_, reject) =>
-          controller.signal.addEventListener(
-            "abort",
-            () => reject(controller.signal.reason),
-            { once: true },
-          ),
-        ),
       ]);
     } finally {
       clearTimeout(timer);
       options.signal?.removeEventListener("abort", abort);
+      if (rejectAborted) controller.signal.removeEventListener("abort", rejectAborted);
     }
   };
   const started = Date.now();
