@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Mic, MicOff, Phone, PhoneOff, ShieldCheck, X } from "lucide-react";
+import { Mic, MicOff, Phone, PhoneOff, ShieldCheck, X, MessageSquare, Send } from "lucide-react";
 import { api } from "./types";
+import { appendDemoTranscript, providerTranscript, type DemoTranscriptLine } from "../../packages/ring-orden-connect/src/demo-transcript";
 import { BrowserPhoneFrame, type PhoneLaunch } from "./BrowserPhoneFrame";
 import { Conversation } from "@elevenlabs/client";
 import { withDeadline } from "../../packages/ring-orden-connect/src/browser-phone";
@@ -28,6 +29,7 @@ type VoiceSession = {
   sendUserMessage?: (text: string) => void;
 };
 export interface VoiceCallProps {
+  demo?: boolean;
   launch?: PhoneLaunch;
   onClose: () => void;
   notify: (message: string) => void;
@@ -35,7 +37,14 @@ export interface VoiceCallProps {
 }
 
 /** Real ElevenLabs audio session. No microphone request occurs until Start call is clicked. */
-export function VoiceCall({ onClose, notify, onUpdate, launch }: VoiceCallProps) {
+export function VoiceCall({ onClose, notify, onUpdate, launch, demo = false }: VoiceCallProps) {
+  const [showText, setShowText] = useState(false);
+  const [transcript, setTranscript] = useState<DemoTranscriptLine[]>([]);
+  const [draft, setDraft] = useState("");
+  const transcriptLog = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (transcriptLog.current) transcriptLog.current.scrollTop = transcriptLog.current.scrollHeight;
+  }, [transcript, showText]);
   const [receiptState, setReceiptState] = useState("");
   const [receiptAttempt, setReceiptAttempt] = useState(0);
   const [receiptMessages, setReceiptMessages] = useState<CallReceiptMessage[]>(
@@ -186,6 +195,8 @@ export function VoiceCall({ onClose, notify, onUpdate, launch }: VoiceCallProps)
     receiptAbort.current = new AbortController();
     setReceiptState("");
     setReceiptMessages([]);
+    setTranscript([]);
+    setDraft("");
     const attempt = ++generation.current;
     starting.current = true;
     setPhase("connecting");
@@ -296,9 +307,13 @@ export function VoiceCall({ onClose, notify, onUpdate, launch }: VoiceCallProps)
           if (current() && !failed && !finished)
             setPhase(mode === "speaking" ? "speaking" : "listening");
         },
-        // Voice transcripts stay out of the caller's message history.
-        onMessage: () => {
-          if (current()) refresh();
+        onMessage: (event) => {
+          if (!current()) return;
+          if (demo) {
+            const line = providerTranscript(event);
+            if (line) setTranscript(lines => appendDemoTranscript(lines, line));
+          }
+          refresh();
         },
         onDisconnect: (details) => {
           finished = true;
@@ -429,6 +444,18 @@ export function VoiceCall({ onClose, notify, onUpdate, launch }: VoiceCallProps)
             : phase === "ended"
               ? "Call ended"
               : "Connection needs attention";
+  const sendDemoText = (text: string): boolean => {
+    const value = text.trim();
+    if (!value || value.length > 4000 || !active || !session.current?.sendUserMessage) return false;
+    try {
+      session.current.sendUserMessage(value);
+      if (demo) setTranscript(lines => appendDemoTranscript(lines, { id: `typed:${crypto.randomUUID()}`, speaker: "user", text: value }));
+      return true;
+    } catch {
+      callbacks.current.notify("Your message could not be sent. Please try again.");
+      return false;
+    }
+  };
   const toggleMute = () => {
     if (!session.current) return;
     try {
@@ -506,15 +533,7 @@ export function VoiceCall({ onClose, notify, onUpdate, launch }: VoiceCallProps)
                 );
               }
             }}
-            onMessage={(text) => {
-              if (
-                !(phase === "listening" || phase === "speaking") ||
-                !session.current?.sendUserMessage
-              )
-                return false;
-              session.current.sendUserMessage(text);
-              return true;
-            }}
+            onMessage={sendDemoText}
           />
           <p
             role="status"
@@ -523,6 +542,31 @@ export function VoiceCall({ onClose, notify, onUpdate, launch }: VoiceCallProps)
           >
             {status}
           </p>
+          {demo && (
+            <section className="demo-call-text">
+              <label className="demo-text-toggle">
+                <input type="checkbox" checked={showText} onChange={event => setShowText(event.target.checked)} />
+                <MessageSquare size={16} /> Show live text (demo)
+              </label>
+              {showText && <>
+                <div ref={transcriptLog} className="demo-transcript-log" role="log" aria-label="Live call text" aria-live="polite" aria-relevant="additions text">
+                  {transcript.length === 0 && <p className="muted">{active ? "Waiting for conversation text…" : "Start a call to see the conversation here."}</p>}
+                  {transcript.map(line => <div key={line.id} className={`demo-transcript-line ${line.speaker}`}>
+                    <strong>{line.speaker === "user" ? "You" : "Agent"}</strong>
+                    <p>{line.text}</p>
+                  </div>)}
+                </div>
+                <form className="demo-text-compose" onSubmit={event => {
+                  event.preventDefault();
+                  if (sendDemoText(draft)) setDraft("");
+                }}>
+                  <input aria-label="Reply to the agent" placeholder={active ? "Type a reply to the agent…" : "Start a call to type a reply"} value={draft} onChange={event => setDraft(event.target.value)} maxLength={4000} disabled={!active} />
+                  <button className="primary" type="submit" disabled={!active || !draft.trim()}><Send size={16} /> Send</button>
+                </form>
+                <p className="muted" style={{fontSize:12, margin:0}}>Demo text for this call. Clears when you start another call.</p>
+              </>}
+            </section>
+          )}
           {receiptState && (
             <div className="info-banner" role="status">
               <p>{receiptState}{receiptState === "Preparing your receipt…" && " You can close this window or start another call. Saved orders remain in Orders."}</p>

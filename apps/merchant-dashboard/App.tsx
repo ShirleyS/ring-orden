@@ -1123,6 +1123,7 @@ export default function MerchantApp() {
       )}
       {modal === "voice" && (
         <VoiceCall
+          demo={data.mode === "demo"}
           launch={phoneLaunch}
           onClose={() => setModal(null)}
           notify={notify}
