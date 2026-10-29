@@ -112,6 +112,33 @@ export function Configuration({
               </>
             }
           />
+          <section className="panel whatsapp-widget-panel">
+            <div className="panel-header">
+              <h3><MessageCircle size={20} /> WhatsApp test widget</h3>
+              <Badge value="demo" />
+            </div>
+            <div className="whatsapp-widget-content">
+              <p>Call Ring Orden and receive order messages on your test phone.</p>
+              <p className="muted">+52 55 91100000 · Demo number</p>
+              <div className="settings-list">
+                <Setting label="WhatsApp webhook (n8n)" value={data.whatsapp_widget?.webhook_added ? "•••••••• · Added" : "Not added"} />
+                <Setting label="Webhook authentication" value={data.whatsapp_widget?.webhook_auth_added ? "•••••••• · Added" : "Not added"} />
+                <Setting label="Public key (ElevenLabs agent ID)" value={data.whatsapp_widget?.public_key_added ? "•••••••• · Added" : "Not added"} />
+              </div>
+              <p className="muted">Uses your saved Ring Orden configuration. Values stay hidden. Added means saved; delivery is checked during a test.</p>
+              <label htmlFor="whatsapp-widget-link">Widget link</label>
+              <input id="whatsapp-widget-link" readOnly value={typeof window === "undefined" ? "" : `${window.location.origin}/app?phone=whatsapp`} />
+              <div className="whatsapp-widget-actions">
+                <button className="primary" onClick={onVoice}><MessageCircle size={16} /> Open WhatsApp widget</button>
+                <button className="secondary" onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(`${window.location.origin}/app?phone=whatsapp`);
+                    notify("WhatsApp widget link copied.");
+                  } catch { notify("Select the widget link above to copy it."); }
+                }}><Copy size={16} /> Copy link</button>
+              </div>
+            </div>
+          </section>
           <div className="config-grid">
             <section className="panel phone-panel">
               <div className="panel-header">

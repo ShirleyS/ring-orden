@@ -339,6 +339,12 @@ function bootstrap(
     events: state.events.map(({ data, ...event }) => event),
     settings: publicSettings(state.settings),
     integrations: integrations(env, state),
+    whatsapp_widget: {
+      webhook_added: Boolean(env.N8N_WEBHOOK_URL?.trim()),
+      webhook_auth_added: Boolean(env.N8N_WEBHOOK_SECRET?.trim()),
+      public_key_added: Boolean(env.ELEVENLABS_AGENT_ID?.trim()),
+      voice_added: Boolean(env.ELEVENLABS_API_KEY?.trim()),
+    },
     team: state.team,
     mode: isDemo(env) ? "demo" : "live",
     user: {

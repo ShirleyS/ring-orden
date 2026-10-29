@@ -24,6 +24,12 @@ export type Workspace = {
   events: Obj[];
   settings: Obj;
   integrations: Obj[];
+  whatsapp_widget?: {
+    webhook_added: boolean;
+    webhook_auth_added: boolean;
+    public_key_added: boolean;
+    voice_added: boolean;
+  };
   team: Obj[];
   mode: string;
   user: Obj;
