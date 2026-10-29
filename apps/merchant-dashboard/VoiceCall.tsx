@@ -93,18 +93,10 @@ export function VoiceCall({ onClose, notify, onUpdate, launch }: VoiceCallProps)
     refresh();
   }, [refresh, releasePermissionStream]);
   const close = useCallback(() => {
+    receiptAbort.current.abort();
     void stop();
-    if (
-      session.current ||
-      starting.current ||
-      phase === "listening" ||
-      phase === "speaking" ||
-      phase === "connecting"
-    )
-      return;
-    if (receiptState === "Preparing your receipt…") return;
     callbacks.current.onClose();
-  }, [stop, phase, receiptState]);
+  }, [stop]);
   const closeRef = useRef(close);
   closeRef.current = close;
   useEffect(() => {
@@ -184,6 +176,11 @@ export function VoiceCall({ onClose, notify, onUpdate, launch }: VoiceCallProps)
 
   const start = async () => {
     if (starting.current || session.current) return;
+    // A new call owns a fresh receipt wait; the ended call cannot update its UI.
+    receiptAbort.current.abort();
+    receiptAbort.current = new AbortController();
+    setReceiptState("");
+    setReceiptMessages([]);
     const attempt = ++generation.current;
     starting.current = true;
     setPhase("connecting");
@@ -524,7 +521,7 @@ export function VoiceCall({ onClose, notify, onUpdate, launch }: VoiceCallProps)
           </p>
           {receiptState && (
             <div className="info-banner" role="status">
-              <p>{receiptState}</p>
+              <p>{receiptState}{receiptState === "Preparing your receipt…" && " You can close this window or start another call. Saved orders remain in Orders."}</p>
               {receiptState !== "Preparing your receipt…" &&
                 !receiptState.startsWith("Your receipt") && (
                   <button
@@ -610,7 +607,6 @@ export function VoiceCall({ onClose, notify, onUpdate, launch }: VoiceCallProps)
             ) : (
               <button
                 className="primary"
-                disabled={receiptState === "Preparing your receipt…"}
                 onClick={() => void start()}
               >
                 <Phone size={16} />
