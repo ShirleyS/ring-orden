@@ -466,3 +466,12 @@ test("an ambiguous post-confirmation edit can request clarification before payme
   assert.equal(after.status, "AWAITING_CLARIFICATION");
   assert.equal(after.total, 180);
 });
+
+test('delivery cannot confirm without an address and switching to pickup clears the address',()=>{
+ const draft=applyOperation(latte(),{action:'set_fulfillment',fulfillment_type:'delivery'});
+ assert.throws(()=>applyOperation(draft,{action:'confirm_order',confirmed:true}),/delivery address/i);
+ const addressed=applyOperation(draft,{action:'set_fulfillment',fulfillment_type:'delivery',delivery_address:'100 Example Street'});
+ assert.equal(applyOperation(addressed,{action:'confirm_order',confirmed:true}).fulfillment.delivery_address,'100 Example Street');
+ const pickup=applyOperation(addressed,{action:'set_fulfillment',fulfillment_type:'pickup'});
+ assert.equal(pickup.fulfillment.delivery_address,undefined);
+});

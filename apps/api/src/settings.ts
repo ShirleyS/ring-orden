@@ -40,6 +40,7 @@ export const SettingsSchemas: Record<string, z.ZodTypeAny> = {
         .max(100)
         .optional(),
       tax_rate: z.number().finite().min(0).max(1).optional(),
+      delivery_fee: z.number().finite().min(0).max(10000).optional(),
       minimum_order: z.number().finite().min(0).max(100000).optional(),
       maximum_order: z.number().finite().min(1).max(100000).optional(),
       maximum_quantity: z.number().int().min(1).max(50).optional(),

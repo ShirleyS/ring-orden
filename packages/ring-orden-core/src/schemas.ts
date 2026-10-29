@@ -71,8 +71,9 @@ export const OrderSchema = z.object({
     .strict(),
   fulfillment: z
     .object({
-      type: z.enum(["pickup", "dine_in"]),
+      type: z.enum(["pickup", "dine_in", "delivery"]),
       scheduled_for: z.string().datetime({ offset: true }).nullable(),
+      delivery_address: z.string().trim().min(1).max(500).optional(),
     })
     .strict(),
   items: z.array(OrderItemSchema).max(50),
@@ -137,7 +138,8 @@ export const OperationSchema = z.discriminatedUnion("action", [
   z
     .object({
       action: z.literal("set_fulfillment"),
-      fulfillment_type: z.enum(["pickup", "dine_in"]),
+      fulfillment_type: z.enum(["pickup", "dine_in", "delivery"]),
+      delivery_address: z.string().trim().min(1).max(500).optional(),
     })
     .strict(),
   z
@@ -165,6 +167,7 @@ export type Operation = z.infer<typeof OperationSchema>;
 export interface PricingRules {
   tax_rate?: number;
   fee_amount?: number;
+  delivery_fee?: number;
   minimum_order?: number;
   maximum_order?: number;
   maximum_quantity?: number;

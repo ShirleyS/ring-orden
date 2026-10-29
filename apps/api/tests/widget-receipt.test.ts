@@ -207,3 +207,18 @@ test("late confirmation delivery cannot rotate a receipt already sent to the stu
     "late receipt send must preserve the widget link",
   );
 });
+
+test("delivery phone receipt includes address, fees and the authoritative total", async () => {
+  const f = await fixture();
+  const row = (await f.repo.loadByMerchant(f.merchant))!;
+  const order = row.state.orders.find(o => o.id === f.order.id)!;
+  order.fulfillment = {type:"delivery",scheduled_for:null,delivery_address:"100 Example Street"};
+  order.fees = 40;
+  order.total = 140;
+  await f.repo.saveTrusted(f.merchant,row.revision,row.state);
+  const response = await f.call("voice/receipt",{conversation_id:"conv-receipt"});
+  assert.equal(response.status,200);
+  assert.match(response.data.message.text,/Entrega a domicilio: 100 Example Street/);
+  assert.match(response.data.message.text,/40.00 MXN/);
+  assert.match(response.data.message.text,/Total: 140.00 MXN/);
+});

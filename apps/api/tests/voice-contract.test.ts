@@ -217,6 +217,7 @@ test("business information exposes actual hours and public ordering rules withou
     maximum_order: 500,
     maximum_quantity: 12,
     tax_rate: 0.16,
+    delivery_fee: 0,
     pickup_minutes: 25,
     after_hours: "scheduled_orders",
     ordering_enabled: false,

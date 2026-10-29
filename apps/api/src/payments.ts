@@ -172,6 +172,8 @@ export async function sendWhatsApp(
         `${i.quantity} × ${i.name}${i.modifiers.length ? " (" + i.modifiers.map((m) => m.name).join(", ") + ")" : ""}`,
     )
     .join("\n");
+  const fulfillmentText = order.fulfillment.type === "delivery" ? `Delivery to ${order.fulfillment.delivery_address ?? "the provided address"}.` : order.fulfillment.type === "dine_in" ? "Enjoy your order here." : "Pickup at the counter.";
+  const paymentText = order.fulfillment.type === "delivery" ? "Pay on delivery" : order.fulfillment.type === "dine_in" ? "Pay at the restaurant" : "Pay at pickup";
   const params = new URLSearchParams({
     From: env.TWILIO_WHATSAPP_FROM.startsWith("whatsapp:")
       ? env.TWILIO_WHATSAPP_FROM
@@ -194,7 +196,7 @@ export async function sendWhatsApp(
         "1": order.external_reference,
         "2": summary,
         "3": `${order.total.toFixed(2)} ${order.currency}`,
-        "4": paymentUrl ?? "Pay at pickup",
+        "4": paymentUrl ?? paymentText,
         ...(receipt
           ? {
               "5":
@@ -212,7 +214,7 @@ export async function sendWhatsApp(
   } else
     params.set(
       "Body",
-      `${order.external_reference}\n${summary}\nTotal: ${order.total.toFixed(2)} ${order.currency}\nPickup at the counter.\n${paymentUrl ?? "Pay at pickup."}`,
+      `${order.external_reference}\n${summary}\nTotal: ${order.total.toFixed(2)} ${order.currency}\n${fulfillmentText}\n${paymentUrl ?? paymentText}`,
     );
   const response = await fetch(
     `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(env.TWILIO_ACCOUNT_SID)}/Messages.json`,

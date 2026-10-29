@@ -52,3 +52,6 @@ Final correction applied in Lovable: show friendly ES/EN order/payment labels ra
 ## Purchase history follow-up
 
 Add Historial / Purchase history as a third in-page tab. On the explicitly fictional demo receipt, show previous purchases from the same restaurant with date, distinct reference, item summary, total and truthful payment state. Each row opens its own read-only historical receipt, without changing the current receipt/billing order or triggering payments, billing submissions, or notifications. On real receipt links, history stays locked until an independent customer-verification flow is connected. The one-order receipt capability must never authorize a cross-order phone lookup. No real history API or verification success should be fabricated.
+
+## Delivery fulfillment extension
+The canonical fulfillment type also supports `delivery`, with a required `delivery_address` before confirmation. Show Delivery / A domicilio and the address on the receipt; do not map unknown types to dine-in. The quoted preparation minutes mean the order will be ready for pickup/dispatch, not courier arrival.

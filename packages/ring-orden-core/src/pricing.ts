@@ -80,7 +80,9 @@ export function priceOrder(
     0,
   );
   const taxRate = rules.tax_rate ?? 0;
-  const fee = rules.fee_amount ?? 0;
+  const deliveryFee = rules.delivery_fee ?? 0;
+  if (!Number.isFinite(deliveryFee) || deliveryFee < 0) throw new Error("Invalid delivery fee policy");
+  const fee = (rules.fee_amount ?? 0) + (order.fulfillment.type === "delivery" ? deliveryFee : 0);
   const maximum = rules.maximum_order ?? 5000;
   if (
     !Number.isFinite(taxRate) ||

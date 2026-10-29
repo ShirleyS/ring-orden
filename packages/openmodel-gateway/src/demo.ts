@@ -129,13 +129,26 @@ export function interpretDemo(
       operations: [
         { action: "escalate_issue", reason: utterance.slice(0, 500) },
       ],
-      reply: "I’ll ask the team to help you. Your order is saved.",
+      reply: "I’ll ask the team to help you with your order.",
     };
   if (/\b(cancel|cancela|cancelar)\b/.test(text))
     return {
       operations: [{ action: "cancel_order" }],
       reply: "Your order has been cancelled.",
     };
+  const wantsPickup = /^(?:for )?(?:pickup|pick up|takeaway|takeout|para recoger|recoger|para llevar)(?: please| por favor)?$/.test(text);
+  const wantsDineIn = /^(?:dine in|eat here|for here|para comer aqui|comer aqui)(?: please| por favor)?$/.test(text);
+  const deliveryMatch = utterance.trim().match(/^(?:for )?(?:delivery|deliver|a domicilio|entrega a domicilio)(?:\s+(?:to|at|a|en)\s+(.+))?(?: please| por favor)?$/i);
+  if (wantsPickup || wantsDineIn) return {operations:[{action:"set_fulfillment",fulfillment_type:wantsPickup?"pickup":"dine_in"}],reply:"Anything else, or can I confirm your order?"};
+  if (deliveryMatch) {
+    const address = deliveryMatch[1]?.trim();
+    return {operations:[{action:"set_fulfillment",fulfillment_type:"delivery",...(address?{delivery_address:address}:{})},...(!address?[{action:"request_clarification" as const,question:"What’s the delivery address?"}]:[])],reply:address?"Can I confirm your order?":"What’s the delivery address?"};
+  }
+  if (order.fulfillment.type === "delivery" && !order.fulfillment.delivery_address) {
+    if (isExplicitConfirmation(utterance)) return clarify("What’s the delivery address?");
+    if (/delivery address/i.test(order.clarification ?? "") && utterance.trim().length >= 8)
+      return {operations:[{action:"set_fulfillment",fulfillment_type:"delivery",delivery_address:utterance.trim().slice(0,500)}],reply:"Thank you. Can I confirm your order?"};
+  }
   if (isExplicitConfirmation(utterance))
     return {
       operations: [{ action: "confirm_order", confirmed: true }],

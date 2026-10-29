@@ -2547,6 +2547,7 @@ function OrderDetail({
               <div>
                 <span className="muted">FULFILLMENT</span>
                 <h3>{label(o.fulfillment?.type || "pickup")}</h3>
+                {o.fulfillment?.delivery_address && <p>{o.fulfillment.delivery_address}</p>}
                 <p>
                   {o.fulfillment?.scheduled_for
                     ? time(o.fulfillment.scheduled_for)
@@ -2943,7 +2944,7 @@ function Simulator({
       setReceiptLink({orderId: order.id, url: url.href});
       setTurns(turns => [...turns, {role: "assistant", content: "Your receipt is ready. Open it to view your order and payment options.", receipt_url: url.href}]);
     } catch {
-      setReceiptError("Your order is saved. The receipt link could not be prepared. Please retry.");
+      setReceiptError("Your order is confirmed. The receipt link could not be prepared. Please retry.");
     } finally { pendingReceiptLinks.current.delete(order.id); setReceiptBusy(false); }
   };
   const end = useRef<HTMLDivElement>(null);
@@ -3004,6 +3005,8 @@ function Simulator({
           "I’d like to speak to a person.",
         ]
       : [
+          "Pickup",
+          "Delivery",
           "Make the second latte regular milk.",
           "Make the first one decaf.",
           "Add an extra shot.",
@@ -3129,6 +3132,7 @@ function Simulator({
                   </div>
                 ))}
               </div>
+              {o.fulfillment?.type === "delivery" && <div style={{display:"flex",justifyContent:"space-between",padding:"12px 0"}}><span>Delivery fee</span><strong>{money(o.fees || 0)}</strong></div>}
               <div className="live-order-total">
                 <span>Total</span>
                 <strong>
@@ -3146,6 +3150,7 @@ function Simulator({
               </p>
             </div>
           )}
+          {o?.items?.length > 0 && <p className="muted" style={{fontSize:13}}>{label(o.fulfillment?.type || "pickup")}{o.fulfillment?.delivery_address ? ` · ${o.fulfillment.delivery_address}` : ""}</p>}
           {confirmed(o) && (
             <div style={{display:"grid",gap:10,marginTop:20}}>
               {!canIssueReceipt && <p className="muted">Ask the workspace owner to create your receipt link.</p>}

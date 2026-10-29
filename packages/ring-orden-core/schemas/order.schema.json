@@ -60,7 +60,8 @@
         "type": {
           "enum": [
             "pickup",
-            "dine_in"
+            "dine_in",
+            "delivery"
           ]
         },
         "scheduled_for": {
@@ -73,6 +74,11 @@
               "type": "null"
             }
           ]
+        },
+        "delivery_address": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
         }
       },
       "required": [

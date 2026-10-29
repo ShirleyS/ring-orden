@@ -14,7 +14,7 @@ Update to the original homepage brief: the normal homepage and a fresh `/order` 
 
 `/order` reads the capability token from the URL fragment only. Keep it in memory or tab-scoped sessionStorage when needed for payment return. No localStorage, analytics, console output, query parameters or third-party token transmission. Use no-referrer. Invalid/missing token or unconfigured API must never fall back to sample data.
 
-Show item/modifier cards, item editor and add-item catalog, first name, pickup/dine-in, optional note, itemized price summary, explicit confirmation, Stripe redirect, pending and verified payment states. No courier delivery or invented pickup promise. Hide internal notes, transcripts, staff and phone information.
+Show item/modifier cards, item editor and add-item catalog, first name, pickup/dine-in, optional note, itemized price summary, explicit confirmation, Stripe redirect, pending and verified payment states. No courier dispatch integration or invented pickup promise. Hide internal notes, transcripts, staff and phone information.
 
 ## API
 Use the exact contract in CUSTOMER_ORDER_LINKS.md. A typed client uses credentials omitted, JSON bodies and Authorization bearer. Always adopt the latest returned server total, order revision and line IDs. Only editable drafts may change. Disable writes during requests and avoid duplicate actions.
@@ -68,3 +68,5 @@ Use `GET /api/customer/receipt` with the same capability-only request rules. The
 n8n receives `job_id`, `claim_token`, `idempotency_key`, `purpose`, `phone`, `url`, `message`, and `expires_at` from RingOrden's protected worker API. Its eventual handoff must use this app's existing server-side integration. Confirm the actual receiver URL, authorization, request fields, duplicate handling and accepted-message response before configuring or activating it. Keep the RingOrden worker secret and `claim_token` out of the customer frontend and unrelated receivers. A receipt/billing/recovery URL is a bearer capability; avoid logging it.
 
 See [LOVABLE_LINK_HANDOFF.md](LOVABLE_LINK_HANDOFF.md) for merchant link generation and worker claim/ack details. No automatic WhatsApp delivery has been verified.
+
+Delivery orders now use fulfillment.type=delivery and delivery_address. Display the delivery label/address explicitly. Courier dispatch is not automated.

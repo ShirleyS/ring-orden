@@ -142,6 +142,7 @@ export class SquareAdapter implements POSAdapter {
     }
   }
   toPayload(order: Order) {
+    if (order.fulfillment.type === "delivery") throw new Error("Delivery requires a delivery-capable POS adapter. Use dashboard delivery or a custom webhook.");
     requireConfirmed(order);
     if (order.tax !== 0 || order.fees !== 0)
       throw new Error(

@@ -94,7 +94,7 @@ const definitions = [
         operations_json: {
           type: "string",
           description:
-            'A JSON array of operations. Allowed shapes: {"action":"add_item","catalog_item_id":"ID","quantity":1,"modifier_ids":["ID"]}; {"action":"remove_item","target":{"line_id":"ORDER_LINE_ID"}}; {"action":"modify_item","target":{"line_id":"ORDER_LINE_ID"},"changes":{"quantity":1,"modifier_ids":["ID"]}}; {"action":"set_customer_name","name":"NAME"}; {"action":"set_fulfillment","fulfillment_type":"pickup"}; {"action":"set_pickup_time","scheduled_for":"ISO-8601"}; {"action":"add_note","note":"TEXT"}; {"action":"request_clarification","question":"TEXT"}. Never include prices, totals, or confirm_order. If IDs or intent are unclear, ask a question.',
+            'A JSON array of operations. Allowed shapes: {"action":"add_item","catalog_item_id":"ID","quantity":1,"modifier_ids":["ID"]}; {"action":"remove_item","target":{"line_id":"ORDER_LINE_ID"}}; {"action":"modify_item","target":{"line_id":"ORDER_LINE_ID"},"changes":{"quantity":1,"modifier_ids":["ID"]}}; {"action":"set_customer_name","name":"NAME"}; {"action":"set_fulfillment","fulfillment_type":"pickup"|"dine_in"|"delivery","delivery_address":"ADDRESS (delivery only)"}; {"action":"set_pickup_time","scheduled_for":"ISO-8601"}; {"action":"add_note","note":"TEXT"}; {"action":"request_clarification","question":"TEXT"}. Never include prices, totals, or confirm_order. If IDs or intent are unclear, ask a question.',
         },
       },
       required: ["session_id", "utterance", "request_id", "operations_json"],

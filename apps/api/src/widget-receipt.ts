@@ -111,7 +111,10 @@ export async function prepareWidgetReceipt(
         `${i.quantity} × ${i.name}${i.modifiers.length ? " (" + i.modifiers.map((m) => m.name).join(", ") + ")" : ""}`,
     )
     .join("\n");
-  const text = `${state.merchant.name}\nPedido ${order.external_reference}\n${lines}\nTotal: ${order.total.toFixed(2)} ${order.currency}\n${order.payment_status === "PAID" ? "Pagado" : "Pago pendiente"}\nVer pedido, recibo y datos de facturación`;
+  const fulfillment = order.fulfillment.type === "delivery"
+    ? `Entrega a domicilio: ${order.fulfillment.delivery_address}\nEnvío y cargos: ${order.fees.toFixed(2)} ${order.currency}`
+    : order.fulfillment.type === "dine_in" ? "Para comer aquí" : "Para recoger";
+  const text = `${state.merchant.name}\nPedido ${order.external_reference}\n${lines}\n${fulfillment}\nTotal: ${order.total.toFixed(2)} ${order.currency}\n${order.payment_status === "PAID" ? "Pagado" : "Pago pendiente"}\nVer pedido, recibo y datos de facturación`;
   const message: WidgetReceiptMessage = {
     id: "receipt-" + order.id,
     text: text.slice(0, 4000),

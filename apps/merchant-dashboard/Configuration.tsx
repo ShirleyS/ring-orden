@@ -1047,6 +1047,7 @@ function ConfigDialog({
           }
           for (const key of [
             "pickup_minutes",
+            "delivery_fee",
             "timeout_ms",
             "minimum_order",
             "maximum_order",
@@ -1167,6 +1168,9 @@ function ConfigDialog({
                   />
                 </label>
               </div>
+              <label>Delivery fee (MXN)
+                <input name="delivery_fee" type="number" min="0" max="10000" step="0.01" defaultValue={v.delivery_fee ?? 0} />
+              </label>
               <p className="field-help">
                 Prices, availability, and limits are enforced by the transaction
                 engine.

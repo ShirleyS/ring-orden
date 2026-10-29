@@ -153,6 +153,8 @@ export function applyOperation(
       return order;
     if (order.status === "AWAITING_CLARIFICATION" && order.clarification)
       throw new Error("Resolve the clarification before confirming");
+    if (order.fulfillment.type === "delivery" && !order.fulfillment.delivery_address?.trim())
+      throw new Error("A delivery address is required before confirming.");
     order = priceOrder(order, catalog, rules);
     if (!order.items.length)
       throw new Error("Add at least one item before confirming");
@@ -235,8 +237,11 @@ export function applyOperation(
     );
   } else if (operation.action === "set_customer_name")
     order.customer.name = operation.name;
-  else if (operation.action === "set_fulfillment")
+  else if (operation.action === "set_fulfillment") {
     order.fulfillment.type = operation.fulfillment_type;
+    if (operation.fulfillment_type !== "delivery") delete order.fulfillment.delivery_address;
+    else if (operation.delivery_address) order.fulfillment.delivery_address = operation.delivery_address;
+  }
   else if (operation.action === "set_pickup_time")
     order.fulfillment.scheduled_for = operation.scheduled_for;
   else if (operation.action === "add_note") order.notes.push(operation.note);

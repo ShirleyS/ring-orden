@@ -388,6 +388,7 @@ function rules(state: TenantState) {
   const business = state.settings.business;
   return {
     tax_rate: Number(business.tax_rate ?? 0),
+    delivery_fee: Number(business.delivery_fee ?? 0),
     maximum_order: Number(business.maximum_order ?? 5000),
     maximum_quantity: Number(business.maximum_quantity ?? 50),
     minimum_order: Number(business.minimum_order ?? 0),
@@ -884,6 +885,9 @@ async function processTurn(
       reply: question,
     };
   }
+  if (result.operations.some(op => op.action === "confirm_order") && order.fulfillment.type === "delivery" && !order.fulfillment.delivery_address) {
+    result = {operations:[{action:"request_clarification",question:"What’s the delivery address?"}],reply:"What’s the delivery address?"};
+  }
   // A model cannot invent customer consent: confirmation must also match the actual utterance.
   if (
     result.operations.some((op) => op.action === "confirm_order") &&
@@ -994,10 +998,16 @@ async function processTurn(
     order.items.length &&
     !["AWAITING_CLARIFICATION", "ESCALATED", "CANCELLED"].includes(order.status)
   )
-    result.reply =
-      order.status === "CONFIRMED"
-        ? `Confirmed: ${summary(order)} Your order is saved.`
-        : `${summary(order)} Anything else, or would you like to confirm?`;
+    {
+      const fulfillment = order.fulfillment.type === "delivery" ? "for delivery" : order.fulfillment.type === "dine_in" ? "to enjoy here" : "for pickup";
+      const minutes = Number(state.settings.agent.pickup_minutes ?? 15);
+      const chosen = result.operations.some(op => op.action === "set_fulfillment") || session.turns.some(turn => turn.operations?.some(op => op.action === "set_fulfillment"));
+      result.reply = order.status === "CONFIRMED"
+        ? (order.fulfillment.type === "delivery"
+          ? `Alright, we’ll have it ready ${order.fulfillment.scheduled_for ? "for your scheduled time" : `in ${minutes} minutes`} for delivery and send it out to ${order.fulfillment.delivery_address}. ${summary(order)} Delivery fee: ${rules(state).delivery_fee.toFixed(2)} ${order.currency}. Thank you—enjoy your order!`
+          : `Alright, we’ll have it ready ${order.fulfillment.scheduled_for ? "for your scheduled time" : `in ${minutes} minutes`} ${fulfillment}. ${summary(order)} Thanks—see you soon!`)
+        : `${summary(order)} ${chosen ? `${order.fulfillment.type === "delivery" ? `Delivery to ${order.fulfillment.delivery_address}. Delivery fee: ${rules(state).delivery_fee.toFixed(2)} ${order.currency}. ` : `${fulfillment.charAt(0).toUpperCase() + fulfillment.slice(1)}. `}Anything else, or can I confirm your order?` : "Is this for pickup or delivery?"}`;
+    }
   const createdAt = new Date().toISOString();
   session.turns.push(
     { id: uid("turn"), role: "user", text: utterance, created_at: createdAt },
@@ -1887,7 +1897,8 @@ export async function handleRequest(
       if (body.fulfillment)
         order.fulfillment = z
           .object({
-            type: z.enum(["pickup", "dine_in"]),
+            type: z.enum(["pickup", "dine_in", "delivery"]),
+            delivery_address: z.string().trim().min(1).max(500).optional(),
             scheduled_for: z.string().datetime({ offset: true }).nullable(),
           })
           .parse(body.fulfillment);
