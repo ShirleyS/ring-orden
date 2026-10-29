@@ -146,4 +146,4 @@ Authored code uses the [MIT license](LICENSE). Vendored templates and dependenci
 
 ## Homepage and demo showcase
 
-The [bilingual homepage and interactive n8n showcase](showcase/README.md) runs without a build. Serve `showcase/` locally or open its `index.html` directly. Login links open the existing merchant app. The diagrams distinguish backend support from integrations that still need live verification.
+The [bilingual homepage and interactive n8n showcase](showcase/README.md) is served at `/` in both application builds. Login opens the merchant workspace at `/app`; customer forms and the caller integration retain their existing routes. `showcase/index.html` is the shared source, and can also be served by itself for a presentation. The diagrams distinguish backend support from integrations that still need live verification.
