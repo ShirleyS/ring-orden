@@ -759,7 +759,7 @@ export default function MerchantApp() {
                   data={data}
                   onSelect={setSelected}
                   navigate={navigate}
-                  onTest={() => setModal("simulator")}
+                  onTest={() => navigate("Phone & agent")}
                   range={range}
                   setRange={setRange}
                 />
@@ -782,7 +782,7 @@ export default function MerchantApp() {
                     action={
                       <button
                         className="primary"
-                        onClick={() => setModal("simulator")}
+                        onClick={() => navigate("Phone & agent")}
                       >
                         <PhoneCall size={16} />
                         Test your agent
