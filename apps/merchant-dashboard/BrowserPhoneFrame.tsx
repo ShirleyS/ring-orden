@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   browserPhoneUrl,
+  openBrowserPhonePopup,
   handleBrowserPhonePopupClosed,
   handleBrowserPhoneMuteRequest,
   readBrowserPhoneEvent,
@@ -15,7 +16,17 @@ export type BrowserPhonePhase =
   | "speaking"
   | "ended"
   | "error";
+export type PhoneLaunch = { instance: string; origin: string; popup: Window | null };
+export function launchCallerPhone(): PhoneLaunch {
+  const instance = crypto.randomUUID();
+  const origin = "https://browser-bell-companion.lovable.app";
+  const popup = openBrowserPhonePopup(window.open.bind(window), origin, window.location.origin, instance);
+  popup?.focus();
+  return { instance, origin, popup };
+}
+
 export interface BrowserPhoneFrameProps {
+  launch?: PhoneLaunch;
   phase: BrowserPhonePhase;
   error: string;
   stage: string;
@@ -27,15 +38,16 @@ export interface BrowserPhoneFrameProps {
   onVolume: (volume: number) => void;
   onMessage: (text: string) => boolean;
 }
-const defaultOrigin = () => window.location.origin;
+const defaultOrigin = () => "https://browser-bell-companion.lovable.app";
 
 export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
   const [instance] = useState(() =>
-    Array.from(crypto.getRandomValues(new Uint8Array(12)), (n) =>
+    props.launch?.instance || Array.from(crypto.getRandomValues(new Uint8Array(12)), (n) =>
       n.toString(16).padStart(2, "0"),
     ).join(""),
   );
   const [origin] = useState(() => {
+    if (props.launch) return props.launch.origin;
     const env = (
       import.meta as ImportMeta & {
         env?: { VITE_BROWSER_PHONE_ORIGIN?: string };
@@ -56,7 +68,7 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
   });
   const url = browserPhoneUrl(origin, window.location.origin, instance);
   const frame = useRef<HTMLIFrameElement>(null);
-  const popup = useRef<Window | null>(null);
+  const popup = useRef<Window | null>(props.launch?.popup || null);
   const iframeReady = useRef(false);
   const handshakeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
@@ -67,7 +79,7 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
   }, [props]);
   const [bridge, setBridge] = useState("Loading caller phone…");
   const [ready, setReady] = useState(false);
-  const [inPopup, setInPopup] = useState(false);
+  const [inPopup, setInPopup] = useState(Boolean(props.launch?.popup));
   const send = (
     type: string,
     payload: Record<string, unknown> = {},
@@ -228,7 +240,9 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
         allow="microphone; autoplay"
         style={{
           width: "100%",
-          height: 560,
+          maxWidth: 400,
+          margin: "0 auto",
+          height: 790,
           border: "1px solid #e1e5df",
           borderRadius: 20,
           display: inPopup ? "none" : "block",

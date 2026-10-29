@@ -76,6 +76,15 @@ export function browserPhoneUrl(
   return url.href;
 }
 
+export function openBrowserPhonePopup<T>(
+  open: (url: string, name: string, features: string) => T | null,
+  origin: string,
+  parentOrigin: string,
+  instance: string,
+): T | null {
+  return open(browserPhoneUrl(origin, parentOrigin, instance), `ring-phone-${instance}`, "popup,width=430,height=820");
+}
+
 export async function withDeadline<T>(
   pending: Promise<T>,
   ms: number,

@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Mic, MicOff, Phone, PhoneOff, ShieldCheck, X } from "lucide-react";
 import { api } from "./types";
-import { BrowserPhoneFrame } from "./BrowserPhoneFrame";
+import { BrowserPhoneFrame, type PhoneLaunch } from "./BrowserPhoneFrame";
+import { Conversation } from "@elevenlabs/client";
 import { withDeadline } from "../../packages/ring-orden-connect/src/browser-phone";
 
 import { waitForCallReceipt } from "../../packages/ring-orden-connect/src/call-receipt";
@@ -27,13 +28,14 @@ type VoiceSession = {
   sendUserMessage?: (text: string) => void;
 };
 export interface VoiceCallProps {
+  launch?: PhoneLaunch;
   onClose: () => void;
   notify: (message: string) => void;
   onUpdate?: () => Promise<void>;
 }
 
 /** Real ElevenLabs audio session. No microphone request occurs until Start call is clicked. */
-export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
+export function VoiceCall({ onClose, notify, onUpdate, launch }: VoiceCallProps) {
   const [receiptState, setReceiptState] = useState("");
   const [receiptAttempt, setReceiptAttempt] = useState(0);
   const [receiptMessages, setReceiptMessages] = useState<CallReceiptMessage[]>(
@@ -272,11 +274,7 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
       }
       permissionStream.current = stream;
       setStage("Loading ElevenLabs audio client (up to 20 seconds)");
-      const { Conversation } = await withDeadline(
-        import("@elevenlabs/client"),
-        20000,
-        "The ElevenLabs audio client took too long to load. Please try again.",
-      );
+      // Load audio with the application so a later deployment cannot remove its lazy chunk.
       if (!current()) return;
       const sessionOptions = {
         connectionType: "websocket",
@@ -445,7 +443,7 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
   return (
     <div className="modal-backdrop" onClick={close}>
       <section
-        className="modal wide"
+        className="modal voice-phone-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="voice-call-title"
@@ -472,6 +470,7 @@ export function VoiceCall({ onClose, notify, onUpdate }: VoiceCallProps) {
           style={{ display: "grid", gap: 20, padding: 24 }}
         >
           <BrowserPhoneFrame
+            launch={launch}
             messages={receiptMessages}
             phase={phase}
             error={error}

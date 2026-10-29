@@ -120,3 +120,19 @@ test("failed mute requests resend authoritative state even when it has not chang
   assert.equal(requested, true);
   assert.deepEqual(states, [false, false]);
 });
+
+test('phone launch opens a sized popup immediately with the same bridge instance', async () => {
+  const { openBrowserPhonePopup } = await import('../src/browser-phone.ts');
+  const calls: unknown[][] = [];
+  const popup = { focus() {} };
+  const result = openBrowserPhonePopup((...args: string[]) => { calls.push(args); return popup; }, 'https://phone.example', 'https://ring.test', 'instance-123');
+  assert.equal(result, popup);
+  assert.equal(calls.length, 1);
+  const [url, name, features] = calls[0] as string[];
+  assert.equal(new URL(url).pathname, '/integration');
+  assert.equal(new URL(url).searchParams.get('session'), 'instance-123');
+  assert.equal(new URL(url).searchParams.get('parent_origin'), 'https://ring.test');
+  assert.equal(name, 'ring-phone-instance-123');
+  assert.match(features, /popup,width=430,height=820/);
+  assert.equal(openBrowserPhonePopup(() => null, 'https://phone.example', 'https://ring.test', 'blocked'), null);
+});

@@ -73,6 +73,7 @@ import MenuImport from "./MenuImport";
 import MenuPhotoUpload from "./MenuPhotoUpload";
 import MenuUploadHistory from "./MenuUploadHistory";
 import VoiceCall from "./VoiceCall";
+import { launchCallerPhone, type PhoneLaunch } from "./BrowserPhoneFrame";
 import CustomerOrderLink from "./CustomerOrderLink";
 import CustomerReceipt from "./CustomerReceipt";
 import Customers from "./Customers";
@@ -242,6 +243,11 @@ function Logo() {
   );
 }
 export default function MerchantApp() {
+  const [phoneLaunch, setPhoneLaunch] = useState<PhoneLaunch>();
+  const openVoicePhone = () => {
+    setPhoneLaunch(launchCallerPhone());
+    setModal("voice");
+  };
   const [data, setData] = useState<Workspace | null>(null),
     [error, setError] = useState(""),
     [page, setPage] = useState("Overview"),
@@ -429,15 +435,21 @@ export default function MerchantApp() {
         {error && mojoAuthReady && !useEmailSignIn ? (
           <>
             <h2>Welcome to Ring Orden</h2>
-            <p>Sign in securely to open your restaurant workspace.</p>
+            <p>Create an account or sign in to open your restaurant workspace.</p>
             {loginError && (
               <p role="alert" style={{ color: "#923c4e" }}>
                 {loginError}
               </p>
             )}
-            <a className="primary" href="/api/auth/mojo/login">
-              Sign in with MojoAuth <ArrowRight size={16} />
-            </a>
+            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 12 }}>
+              <a className="primary" href="/api/auth/mojo/login">
+                Sign up <ArrowRight size={16} />
+              </a>
+              <a className="secondary" href="/api/auth/mojo/login">
+                Sign in with MojoAuth
+              </a>
+            </div>
+            <p>New here? Verify your email with MojoAuth to create your account. No password needed.</p>
             {supabaseAuthConfigured && (
               <button
                 className="text-button"
@@ -1005,7 +1017,7 @@ export default function MerchantApp() {
                   notify={notify}
                   onTest={() => setModal("simulator")}
                   onOnboard={() => setModal("onboarding")}
-                  onVoice={() => setModal("voice")}
+                  onVoice={openVoicePhone}
                 />
               )}
             </>
@@ -1111,6 +1123,7 @@ export default function MerchantApp() {
       )}
       {modal === "voice" && (
         <VoiceCall
+          launch={phoneLaunch}
           onClose={() => setModal(null)}
           notify={notify}
           onUpdate={load}

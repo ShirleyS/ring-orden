@@ -4300,3 +4300,5 @@ td strong {
 .whatsapp-widget-content label { display: block; margin: 18px 0 8px; font-size: 13px; }
 .whatsapp-widget-content input { width: 100%; }
 .whatsapp-widget-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
+
+.modal.voice-phone-modal { width: min(100% - 32px, 480px); }
