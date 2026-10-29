@@ -28,6 +28,7 @@ export function launchCallerPhone(): PhoneLaunch {
 }
 
 export interface BrowserPhoneFrameProps {
+  compact?: boolean;
   launch?: PhoneLaunch;
   phase: BrowserPhonePhase;
   error: string;
@@ -138,7 +139,7 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
           sendState(frame.current?.contentWindow);
         }
         setBridge(
-          "The phone window did not connect. Use the phone below or click Open phone window to try again.",
+          "The phone window did not connect. Use Start call here, or click Open phone window to try again.",
         );
       },
       10000,
@@ -252,7 +253,7 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
     );
     if (!opened) {
       setBridge(
-        "The popup was blocked. Use the embedded caller phone or allow popups.",
+        "The popup was blocked. Use Start call here or allow popups.",
       );
       return;
     }
@@ -281,18 +282,19 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
           height: 790,
           border: "1px solid #e1e5df",
           borderRadius: 20,
-          display: inPopup ? "none" : "block",
+          display: props.compact || inPopup ? "none" : "block",
           background: "#fafaf7",
         }}
       />
-      {inPopup && <p>{ready ? "Caller phone is open in its own window." : "Opening your phone window…"}</p>}
-      <p role="status" style={{ margin: 0, fontSize: 12 }}>
-        {bridge}
-      </p>
-      <p role="status" style={{ margin: 0, fontSize: 12 }}>
-        ElevenLabs agent · {props.stage || "Ready for your call"}
-      </p>
-      <details style={{ fontSize: 11, overflowWrap: "anywhere" }}>
+      {props.compact ? (
+        <p role="status" className="muted" style={{margin:0,fontSize:12,textAlign:"center"}}>
+          {ready ? (inPopup ? "Phone connected in its own window" : "Phone ready") : (bridge.startsWith("The phone") || bridge.startsWith("The popup") ? bridge : "Connecting your phone…")}
+        </p>
+      ) : <>
+        {inPopup && <p>{ready ? "Caller phone is open in its own window." : "Opening your phone window…"}</p>}
+        <p role="status" style={{margin:0,fontSize:12}}>{bridge}</p>
+      </>}
+      {!props.compact && <details style={{ fontSize: 11, overflowWrap: "anywhere" }}>
         <summary>Phone &amp; agent connection details</summary>
         <p>Phone destination: {url}</p>
         <p>Instance: {instance}</p>
@@ -303,14 +305,14 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
         </p>
         <p>Stage: {props.stage || "Waiting for Start call"}</p>
         <p>Bridge: {bridge}</p>
-      </details>
+      </details>}
       <a
         href={url}
         onClick={(event) => {
           event.preventDefault();
           openPhone();
         }}
-        style={{ fontSize: 12 }}
+        style={{ fontSize: 12, textAlign: props.compact ? "center" : undefined }}
       >
         Open phone window ↗
       </a>

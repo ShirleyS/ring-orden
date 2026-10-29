@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Mic, MicOff, Phone, PhoneOff, ShieldCheck, X, MessageSquare, Send } from "lucide-react";
+import { Mic, MicOff, Phone, PhoneOff, ShieldCheck, X, MessageSquare, Send, AudioLines, Loader2 } from "lucide-react";
 import { api } from "./types";
 import { appendDemoTranscript, providerTranscript, type DemoTranscriptLine } from "../../packages/ring-orden-connect/src/demo-transcript";
 import { BrowserPhoneFrame, type PhoneLaunch } from "./BrowserPhoneFrame";
@@ -471,7 +471,7 @@ export function VoiceCall({ onClose, notify, onUpdate, launch, demo = false }: V
   return (
     <div className="modal-backdrop" onClick={close}>
       <section
-        className="modal voice-phone-modal"
+        className="modal wide"
         role="dialog"
         aria-modal="true"
         aria-labelledby="voice-call-title"
@@ -497,7 +497,55 @@ export function VoiceCall({ onClose, notify, onUpdate, launch, demo = false }: V
           className="modal-body"
           style={{ display: "grid", gap: 20, padding: 24 }}
         >
+          <div style={{ textAlign: "center", padding: "12px 0 4px" }}>
+            <div
+              aria-hidden="true"
+              style={{
+                width: 92,
+                height: 92,
+                margin: "0 auto 18px",
+                display: "grid",
+                placeItems: "center",
+                borderRadius: "50%",
+                color: "#fff",
+                background: active
+                  ? "radial-gradient(circle at 35% 30%,#ca8e96,#8c4357 66%,#623446)"
+                  : "radial-gradient(circle at 35% 30%,#9eaa94,#526549)",
+                boxShadow: active
+                  ? "0 0 0 9px #f5e9eb,0 0 0 18px #fbf4f4"
+                  : "0 0 0 9px #eef1e9",
+              }}
+            >
+              {connecting ? (
+                <Loader2 className="spin" size={34} />
+              ) : phase === "speaking" ? (
+                <AudioLines size={36} />
+              ) : muted ? (
+                <MicOff size={32} />
+              ) : (
+                <Mic size={32} />
+              )}
+            </div>
+            <p
+              role="status"
+              aria-live="polite"
+              style={{ fontWeight: 600, fontSize: 17, marginBottom: 9 }}
+            >
+              {status}
+            </p>
+            <p
+              className="muted"
+              style={{ lineHeight: 1.7, maxWidth: 430, margin: "0 auto" }}
+            >
+              {active
+                ? "Speak naturally. Interrupt, change your mind, and ask a clarification."
+                : phase === "ended"
+                  ? "Your conversation has ended. You can make another call."
+                  : "Start call asks for microphone access. Your agent’s server tools save and validate each order."}
+            </p>
+          </div>
           <BrowserPhoneFrame
+            compact
             launch={launch}
             messages={receiptMessages}
             phase={phase}
@@ -535,13 +583,6 @@ export function VoiceCall({ onClose, notify, onUpdate, launch, demo = false }: V
             }}
             onMessage={sendDemoText}
           />
-          <p
-            role="status"
-            aria-live="polite"
-            style={{ margin: 0, textAlign: "center" }}
-          >
-            {status}
-          </p>
           {demo && (
             <section className="demo-call-text">
               <label className="demo-text-toggle">
@@ -615,21 +656,12 @@ export function VoiceCall({ onClose, notify, onUpdate, launch, demo = false }: V
               </p>
             </div>
           )}
-          {agentId && (
-            <p
-              className="muted"
-              style={{ fontSize: 11, overflowWrap: "anywhere" }}
-            >
-              ElevenLabs agent: {agentId}
-            </p>
-          )}
-          {conversationId && (
-            <p
-              className="muted"
-              style={{ fontSize: 10, overflowWrap: "anywhere" }}
-            >
-              Conversation {conversationId}
-            </p>
+          {(agentId || conversationId) && (
+            <details className="muted" style={{fontSize:11, overflowWrap:"anywhere"}}>
+              <summary>Call details</summary>
+              {agentId && <p>ElevenLabs agent: {agentId}</p>}
+              {conversationId && <p>Conversation {conversationId}</p>}
+            </details>
           )}
         </div>
         <div className="modal-footer">
