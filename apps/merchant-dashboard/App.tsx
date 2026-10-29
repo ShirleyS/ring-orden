@@ -2921,6 +2921,31 @@ function Simulator({
     [busy, setBusy] = useState(false),
     [err, setErr] = useState(""),
     [voice, setVoice] = useState(false);
+  const [receiptLink, setReceiptLink] = useState<{orderId: string; url: string} | null>(null);
+  const [receiptBusy, setReceiptBusy] = useState(false);
+  const [receiptError, setReceiptError] = useState("");
+  const receiptLinks = useRef(new Map<string, string>());
+  const pendingReceiptLinks = useRef(new Set<string>());
+  const canIssueReceipt = data.user.role === "OWNER";
+  const confirmed = (order: Obj | undefined) => Boolean(order?.items?.length && ["CONFIRMED", "PAYMENT_PENDING", "PAID", "POS_SYNC_PENDING", "POS_SYNCED", "POS_SYNC_FAILED", "PREPARING", "READY", "COMPLETED"].includes(order.status));
+  const loadReceipt = async (order: Obj) => {
+    if (!confirmed(order) || !canIssueReceipt || pendingReceiptLinks.current.has(order.id)) return;
+    const cached = receiptLinks.current.get(order.id);
+    if (cached) { setReceiptLink({orderId: order.id, url: cached}); return; }
+    pendingReceiptLinks.current.add(order.id);
+    setReceiptBusy(true);
+    setReceiptError("");
+    try {
+      const link = await api<{url: string}>(`/orders/${order.id}/receipt-link`, "POST", {}, AbortSignal.timeout(10000));
+      const url = new URL(link.url);
+      if (url.protocol !== "https:" || url.username || url.password) throw new Error("The receipt destination is not available.");
+      receiptLinks.current.set(order.id, url.href);
+      setReceiptLink({orderId: order.id, url: url.href});
+      setTurns(turns => [...turns, {role: "assistant", content: "Your receipt is ready. Open it to view your order and payment options.", receipt_url: url.href}]);
+    } catch {
+      setReceiptError("Your order is saved. The receipt link could not be prepared. Please retry.");
+    } finally { pendingReceiptLinks.current.delete(order.id); setReceiptBusy(false); }
+  };
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
     api("/sessions", "POST", {})
@@ -2958,6 +2983,8 @@ function Simulator({
       setSession({ ...session, order: r.order });
       setTurns((t) => [...t, { role: "assistant", content: r.reply }]);
       await onUpdate();
+      if (confirmed(r.order)) await loadReceipt(r.order);
+      else setReceiptLink(null);
       if (voice && typeof speechSynthesis !== "undefined") {
         const u = new SpeechSynthesisUtterance(r.reply);
         u.lang = "en-US";
@@ -3021,6 +3048,9 @@ function Simulator({
                 <div>
                   <small>{t.role === "assistant" ? "RING ORDEN" : "YOU"}</small>
                   <p>{t.content}</p>
+                  {t.receipt_url && <a className="text-button" href={t.receipt_url} target="_blank" rel="noopener noreferrer" style={{display:"inline-flex",alignItems:"center",gap:6,marginTop:10}}>
+                    <FileText size={15} /> View receipt & payment options <ExternalLink size={14} />
+                  </a>}
                 </div>
               </div>
             ))}
@@ -3114,6 +3144,17 @@ function Simulator({
                 <br />
                 is about to happen.
               </p>
+            </div>
+          )}
+          {confirmed(o) && (
+            <div style={{display:"grid",gap:10,marginTop:20}}>
+              {!canIssueReceipt && <p className="muted">Ask the workspace owner to create your receipt link.</p>}
+              {receiptBusy && <p role="status"><Loader2 size={15} className="spin" /> Preparing your receipt link…</p>}
+              {receiptLink && receiptLink.orderId === o.id && <a className="primary full" href={receiptLink.url} target="_blank" rel="noopener noreferrer">
+                <FileText size={16} /> View receipt & payment options <ExternalLink size={15} />
+              </a>}
+              {receiptError && <p role="alert" className="inline-error">{receiptError}</p>}
+              {canIssueReceipt && !receiptBusy && !receiptLink && <button className="secondary full" onClick={() => void loadReceipt(o)}>Get receipt link</button>}
             </div>
           )}
           <div className="order-assurance">
