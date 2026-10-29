@@ -329,6 +329,10 @@ export default function MerchantApp() {
       "invite",
     );
     if (invitation) setModal("invite");
+    if (new URLSearchParams(window.location.search).get("phone") === "whatsapp") {
+      setPage("Phone & agent");
+      setModal("voice");
+    }
     return () => document.removeEventListener("keydown", f);
   }, []);
   useEffect(() => {

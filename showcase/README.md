@@ -1,6 +1,6 @@
 # Ring Orden homepage and showcase
 
-A self-contained, bilingual homepage for Ring Orden, with sponsor highlights, open-source links and interactive n8n diagrams. No installation or build is required.
+A self-contained, bilingual homepage for Ring Orden, with sponsor highlights, open-source links and interactive n8n diagrams. It is the application homepage at `/`; the merchant workspace and sign-in live at `/app`. Both Netlify and Vinext use `showcase/index.html` as the canonical homepage source.
 
 From the repository root:
 
@@ -8,14 +8,14 @@ From the repository root:
 python3 -m http.server 8768 --bind 127.0.0.1 --directory showcase
 ```
 
-Open http://127.0.0.1:8768/ or open `showcase/index.html` directly in a browser. The page has no external font, script or image dependencies.
+Open http://127.0.0.1:8768/ or open `showcase/index.html` directly in a browser for a standalone presentation. The page has no external font, script or image dependencies. To test the homepage together with the workspace, run `npm run dev` (Vinext), or `npx vite --config vite.netlify.config.ts` (Netlify UI). A standalone static server does not provide `/app` or authentication.
 
 ## Presenting
 
 - Use **English / Español** above the workflow or the language button in the header. Labels, nodes, explanations and page text switch together.
 - Click a workflow tab, then a node to read its explanation. On a narrow screen, scroll the diagram horizontally.
 - **Present** enters presentation mode. Arrow keys and Page Up/Down move between sections; Escape exits. The control is hidden on small screens.
-- Login buttons link to the existing merchant app at https://ring-orden-shirleys.netlify.app/ . Authentication remains in that app; the static homepage does not collect credentials.
+- Login buttons link to `/app` on the same origin. Authentication remains in the merchant workspace; the homepage does not collect credentials. Existing root sign-in callbacks, invitations and WhatsApp widget links continue to `/app` with their query and fragment intact.
 
 ## What the diagrams mean
 
@@ -29,7 +29,7 @@ Provider and workflow behavior was reviewed against the local V2.1 customer-auto
 
 ## Verification
 
-The release was checked in the browser and with 72 DOM checks covering every clickable node across four workflow views, both languages, synchronized controls, login destinations, section anchors, unique IDs and portable links. This static addition does not modify the merchant application or deploy a new public homepage automatically.
+The release was checked in the browser and with 72 DOM checks covering every clickable node across four workflow views, both languages, synchronized controls, login destinations, section anchors, unique IDs and portable links. The Netlify build emits the showcase as `dist-netlify/index.html` and the workspace as `dist-netlify/app/index.html`. Netlify fallback routes, including `/customer` and `/integration`, use the workspace entry. The Vinext root route returns the same HTML and its `/app` page renders the existing workspace. Publishing requires the normal deployment pipeline.
 
 The source is covered by the repository's MIT license.
 

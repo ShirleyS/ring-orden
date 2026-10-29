@@ -338,7 +338,7 @@ export async function handleMojoAuthRequest(
     if (typeof tokens.id_token !== "string")
       throw new Error("Missing ID token");
     const identity = await verifyMojoToken(tokens.id_token, env, tx.nonce);
-    return redirect("/", [
+    return redirect("/app", [
       clearTransaction,
       clearWorkspace,
       await makeSessionCookie(identity, env),

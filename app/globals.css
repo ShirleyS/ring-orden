@@ -4291,3 +4291,12 @@ td strong {
  .menu-upload-confirm-actions { flex-direction:column; align-items:stretch; }
  .menu-upload-confirm-actions button { justify-content:center; white-space:normal; }
 }
+
+.whatsapp-widget-panel { margin-bottom: 24px; }
+.whatsapp-widget-panel h3 { display: flex; align-items: center; gap: 10px; }
+.whatsapp-widget-content { padding: 0 28px 28px; }
+.whatsapp-widget-content .settings-list { padding: 0; }
+.whatsapp-widget-content .muted { color: var(--text-muted, #7b8373); font-size: 13px; }
+.whatsapp-widget-content label { display: block; margin: 18px 0 8px; font-size: 13px; }
+.whatsapp-widget-content input { width: 100%; }
+.whatsapp-widget-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
