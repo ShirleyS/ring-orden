@@ -73,6 +73,7 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
   const popup = useRef<Window | null>(props.launch?.popup || null);
   const iframeReady = useRef(false);
   const popupReady = useRef(false);
+  const configuredPeer = useRef<Window | null>(null);
   const handshakeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
@@ -131,7 +132,8 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
           popup.current.close();
           popup.current = null;
           setInPopup(false);
-          setReady(iframeReady.current);
+          configuredPeer.current = null;
+          setReady(false);
           configure(frame.current?.contentWindow);
           sendState(frame.current?.contentWindow);
         }
@@ -148,19 +150,24 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
       const peer = popup.current || frame.current?.contentWindow;
       const message = readBrowserPhoneEvent(event, peer, origin, instance);
       if (!message) {
-        // Keep the embedded fallback ready without letting it control the popup's call.
-        if (popup.current && readBrowserPhoneEvent(event, frame.current?.contentWindow, origin, instance)?.type === "ready")
-          iframeReady.current = true;
         return;
       }
       switch (message.type) {
         case "ready":
+          // Ready only means the document loaded, not that configuration arrived.
+          configuredPeer.current = null;
+          popupReady.current = false;
+          setReady(false);
+          setBridge("Connecting the phone to Ring Orden…");
+          configure();
+          break;
+        case "configured":
+          configuredPeer.current = peer ?? null;
           if (popup.current) popupReady.current = true;
           clearTimeout(handshakeTimer.current);
           if (!popup.current) iframeReady.current = true;
           setReady(true);
           setBridge("Caller phone connected");
-          configure();
           sendState();
           sendMessages();
           break;
@@ -195,6 +202,8 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
     window.addEventListener("message", handle);
     let recoveryAttempts = 0;
     const watchPopup = setInterval(() => {
+      const selectedPeer = popup.current || frame.current?.contentWindow;
+      if (selectedPeer && configuredPeer.current !== selectedPeer) configure(selectedPeer);
       if (popup.current && !popupReady.current && recoveryAttempts < 3) {
         if (recoverBlankPhonePopup(popup.current, url)) {
           recoveryAttempts++;
@@ -206,13 +215,11 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
         () => current.current.onStop(),
         () => {
           popup.current = null;
+          popupReady.current = false;
+          configuredPeer.current = null;
           setInPopup(false);
-          setReady(iframeReady.current);
-          setBridge(
-            iframeReady.current
-              ? "Caller phone connected"
-              : "Popup closed; reconnecting embedded caller phone…",
-          );
+          setReady(false);
+          setBridge("Popup closed; reconnecting the phone…");
           configure(frame.current?.contentWindow);
           sendState(frame.current?.contentWindow);
           sendMessages();
@@ -250,6 +257,7 @@ export function BrowserPhoneFrame(props: BrowserPhoneFrameProps) {
     }
     popup.current = opened;
     popupReady.current = false;
+    configuredPeer.current = null;
     recoverBlankPhonePopup(opened, url);
     setInPopup(true);
     setReady(false);

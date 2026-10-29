@@ -146,3 +146,10 @@ test('blank popup retries its destination but never reloads an already loaded cr
   assert.equal(recoverBlankPhonePopup({closed:false, get location(): {href:string;replace:(url:string)=>void} {throw new Error('cross-origin');}}, 'https://phone.example'), false);
   assert.equal(recoverBlankPhonePopup({closed:false, location:{href:'https://phone.example/integration', replace:()=>assert.fail()}}, 'https://phone.example'), false);
 });
+
+test('configuration acknowledgement is accepted only from the exact launched phone', () => {
+  const configured = {protocol:'browser-phone',v:1,session:'nonce',type:'configured'};
+  assert.deepEqual(readBrowserPhoneEvent(event(configured),source,'https://phone.example','nonce'),configured);
+  assert.equal(readBrowserPhoneEvent(event(configured,undefined,{}),source,'https://phone.example','nonce'),null);
+  assert.equal(readBrowserPhoneEvent(event({...configured,session:'old-session'}),source,'https://phone.example','nonce'),null);
+});

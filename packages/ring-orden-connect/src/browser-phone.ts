@@ -3,7 +3,7 @@ export type BrowserPhoneEvent = {
   v: 1;
   session: string;
 } & (
-  | { type: "ready" | "call.request" | "call.end.request" }
+  | { type: "ready" | "configured" | "call.request" | "call.end.request" }
   | { type: "call.mute.request"; muted: boolean }
   | { type: "call.volume.request"; volume: number }
   | { type: "message.request"; id: string; text: string }
@@ -32,6 +32,7 @@ export function readBrowserPhoneEvent(
     return null;
   switch (data.type) {
     case "ready":
+    case "configured":
     case "call.request":
     case "call.end.request":
       break;
