@@ -248,7 +248,7 @@ test("valid hosted callback creates a session that opens the correct isolated wo
     const { auth, cookie } = await begin();
     const response = await callback(auth, cookie);
     assert.equal(response.status, 302);
-    assert.equal(response.headers.get("location"), "/");
+    assert.equal(response.headers.get("location"), "/app");
     assert.ok(
       response.headers
         .getSetCookie()
@@ -297,7 +297,7 @@ test("client-secret-basic discovery authenticates the code exchange server-side"
     discovery.token_endpoint_auth_methods_supported = ["client_secret_basic"];
     const { auth, cookie } = await begin();
     const response = await callback(auth, cookie);
-    assert.equal(response.headers.get("location"), "/");
+    assert.equal(response.headers.get("location"), "/app");
     assert.ok(
       response.headers
         .getSetCookie()
@@ -519,7 +519,7 @@ test("signing in clears another account's remembered workspace before opening th
     const { auth, cookie } = await begin();
     const previousCookies = cookie + "; ring_workspace=another-merchant";
     const response = await callback(auth, previousCookies);
-    assert.equal(response.headers.get("location"), "/");
+    assert.equal(response.headers.get("location"), "/app");
     const bootstrap = await handleRequest(
       new Request(origin + "/api/bootstrap", {
         headers: { cookie: applyCookies(previousCookies, response) },
